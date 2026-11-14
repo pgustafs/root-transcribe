@@ -140,6 +140,18 @@ SAME = {
     "gonna": "going to", "wanna": "want to", "gotta": "got to", "kinda": "kind of",
     "sorta": "sort of", "dunno": "do not know", "alright": "all right", "'til": "until", "til": "until",
 }
+# British spellings in the AMI transcripts, mapped to the American ones Whisper
+# usually writes. Matched at the start of a word, so endings are covered.
+BRITISH = {
+    "colour": "color", "favour": "favor", "behaviour": "behavior", "flavour": "flavor", "honour": "honor",
+    "labour": "labor", "neighbour": "neighbor", "humour": "humor", "rumour": "rumor", "centre": "center",
+    "theatre": "theater", "metre": "meter", "litre": "liter", "programme": "program", "grey": "gray",
+    "realis": "realiz", "organis": "organiz", "recognis": "recogniz", "apologis": "apologiz",
+    "summaris": "summariz", "prioritis": "prioritiz", "minimis": "minimiz", "maximis": "maximiz",
+    "specialis": "specializ", "standardis": "standardiz", "customis": "customiz", "finalis": "finaliz",
+    "categoris": "categoriz", "memoris": "memoriz", "characteris": "characteriz", "utilis": "utiliz",
+    "visualis": "visualiz", "analys": "analyz",
+}
 _ONES = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
 _TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
 
@@ -168,6 +180,10 @@ def normalize(text: str) -> list[str]:
             out += number_words(int(word))
             continue
         word = SAME.get(word, word.lstrip("'"))
+        for british, american in BRITISH.items():
+            if word.startswith(british) and not word.startswith(("analysi", "analyst")):
+                word = american + word[len(british):]
+                break
         out += [w for w in word.split() if w not in FILLERS]
     return out
 
@@ -225,9 +241,9 @@ def edit_distance(ref: list[str], hyp: list[str]) -> int:
 def align(ref: list[str], hyp: list[str]):
     """Word alignment: counts and the individual errors.
 
-    Returns ``(substitutions, deletions, insertions)`` as lists of
-    ``(reference word, transcript word)``, ``reference word`` and
-    ``transcript word``.
+    Returns ``(substitutions, deletions, insertions, deleted_at)``: lists of
+    ``(reference word, transcript word)``, ``reference word``, ``transcript
+    word``, and the positions in ``ref`` of the left-out words.
     """
     rows, cols = len(ref), len(hyp)
     steps = [bytearray(cols + 1) for _ in range(rows + 1)]  # 0 match, 1 sub, 2 del, 3 ins
@@ -246,7 +262,7 @@ def align(ref: list[str], hyp: list[str]):
             current.append(best)
             row[j] = (0 if r == hyp[j - 1] else 1) if best == diagonal else 2 if best == up else 3
         previous = current
-    substitutions, deletions, insertions = [], [], []
+    substitutions, deletions, insertions, deleted_at = [], [], [], []
     i, j = rows, cols
     while i or j:
         step = steps[i][j]
@@ -256,11 +272,35 @@ def align(ref: list[str], hyp: list[str]):
             i, j = i - 1, j - 1
         elif step == 2:
             deletions.append(ref[i - 1])
+            deleted_at.append(i - 1)
             i -= 1
         else:
             insertions.append(hyp[j - 1])
             j -= 1
-    return substitutions, deletions, insertions
+    return substitutions, deletions, insertions, deleted_at
+
+
+def where_left_out(left_out, hyp_turns: dict[str, list[tuple[float, float]]], mapping: dict[str, str]):
+    """Sort left-out reference words by what the app did at that moment.
+
+    ``left_out`` holds ``(word, reference speaker, time)``. ``mapping`` pairs the
+    app's speaker labels with the reference speakers.
+    """
+    label_of = {ref: hyp for hyp, ref in mapping.items()}
+    places: dict[str, list[str]] = {"other_speaker": [], "no_speech": [], "own_turn": []}
+
+    def speaking(label: str | None, moment: float) -> bool:
+        return label is not None and any(a <= moment <= b for a, b in hyp_turns.get(label, ()))
+
+    for word, speaker, moment in left_out:
+        own = label_of.get(speaker)
+        if speaking(own, moment):
+            places["own_turn"].append(word)
+        elif any(speaking(label, moment) for label in hyp_turns if label != own):
+            places["other_speaker"].append(word)
+        else:
+            places["no_speech"].append(word)
+    return places
 
 
 def most_common(items: list, count: int = 12) -> list:
@@ -554,16 +594,20 @@ def run(args: argparse.Namespace) -> int:
     # over each other the order is still ambiguous, so WER is approximate there;
     # cpWER does not depend on it.
     ref_turn_words = []
-    for words in reference.values():
+    for speaker, words in reference.items():
         ordered = sorted(words)
         for start, end in to_turns(ordered):
-            ref_turn_words.append((start, [w for s, e, w in ordered if start <= s and e <= end + 1e-6]))
-    ref_all = [word for _, turn in sorted(ref_turn_words, key=lambda t: t[0]) for word in turn]
+            ref_turn_words.append(
+                (start, [(w, speaker, (s + e) / 2) for s, e, w in ordered if start <= s and e <= end + 1e-6])
+            )
+    ref_timed = [entry for _, turn in sorted(ref_turn_words, key=lambda t: t[0]) for entry in turn]
+    ref_all = [word for word, _, _ in ref_timed]
     ref_by_speaker = {speaker: [w for _, _, w in sorted(words)] for speaker, words in reference.items()}
 
-    substitutions, deletions, insertions = align(ref_all, hyp_all)
+    substitutions, deletions, insertions, deleted_at = align(ref_all, hyp_all)
     wer = (len(substitutions) + len(deletions) + len(insertions)) / len(ref_all)
     cpwer, mapping = cp_wer(ref_by_speaker, hyp_by_speaker)
+    where = where_left_out([ref_timed[i] for i in deleted_at], hyp_turns, mapping)
     ref_turns = {s: to_turns(w) for s, w in reference.items()}
     speaker_time = der(ref_turns, hyp_turns, duration, collar=0.25)
     strict = der(ref_turns, hyp_turns, duration)
@@ -587,6 +631,8 @@ def run(args: argparse.Namespace) -> int:
         "common_substitutions": [[a, b, n] for (a, b), n in most_common(substitutions)],
         "common_left_out": most_common(deletions),
         "common_added": most_common(insertions),
+        "left_out_where": {place: len(found) for place, found in where.items()},
+        "left_out_words_where": {place: most_common(found) for place, found in where.items()},
         "speaker_mapping": mapping,
         "recording_id": recording["id"],
     }
@@ -601,8 +647,8 @@ def run(args: argparse.Namespace) -> int:
         "".join(f"{speaker}: {' '.join(words)}\n" for speaker, words in ref_by_speaker.items())
     )
 
-    def words(items: list[str]) -> str:
-        return ", ".join(f"{word} ({n})" for word, n in most_common(items, 8)) or "-"
+    def words(items: list[str], count: int = 8) -> str:
+        return ", ".join(f"{word} ({n})" for word, n in most_common(items, count)) or "-"
 
     timing = "" if args.recording else f"\n  Processing time   {elapsed:.0f}s ({elapsed / duration:.2f}x the audio length)"
     print(f"""
@@ -614,7 +660,10 @@ Result for {meeting} ({duration / 60:.1f} min, language {args.language})
   cpWER             {cpwer:6.1%}   words wrong or under the wrong speaker
   DER               {speaker_time['der']:6.1%}   speech time: missed {speaker_time['missed']:.1%}, invented {speaker_time['false_alarm']:.1%}, wrong speaker {speaker_time['confusion']:.1%}
                              (0.25 s around turn edges not scored; {strict['der']:.1%} when it is){timing}
-  Most often left out   {words(deletions)}
+  Left-out words, by where they were spoken:
+    {len(where['other_speaker']):4d}  while the app gave the moment to another speaker   {words(where['other_speaker'], 6)}
+    {len(where['no_speech']):4d}  where the app detected no speech at all            {words(where['no_speech'], 6)}
+    {len(where['own_turn']):4d}  inside a turn the app did transcribe for them      {words(where['own_turn'], 6)}
   Most often added      {words(insertions)}
   Most often replaced   {', '.join(f'{a}→{b}' for (a, b), _ in most_common(substitutions, 8)) or '-'}
 Details saved in {out}/. The recording stays in the “{WORKSPACE_NAME}” workspace.""")
