@@ -2664,12 +2664,22 @@ def generate_meeting_note(note_id: str) -> dict[str, str]:
                 ]
             )
             instructions, title = note.instructions, recording.title
+            runner = agent_runner.get_agent_runner()
+            try:
+                # Fit the parts to the model actually being served.
+                max_chars = meeting_notes.input_budget_chars(
+                    runner.context_tokens_sync(),
+                    instructions,
+                    settings.NOTES_MAX_INPUT_CHARS,
+                )
+            except meeting_notes.ContextTooSmall as exc:
+                raise agent_runner.AgentRunError(str(exc)) from None
             answer = meeting_notes.write_note(
-                agent_runner.get_agent_runner(),
+                runner,
                 instructions=instructions,
                 title=title,
                 lines=lines,
-                max_chars=settings.NOTES_MAX_INPUT_CHARS,
+                max_chars=max_chars,
                 on_step=lambda step: meeting_note_crud.set_step_sync(
                     session, note_id=nid, step=step
                 ),
@@ -2683,10 +2693,11 @@ def generate_meeting_note(note_id: str) -> dict[str, str]:
             )
             return {"status": "ready", "chars": str(len(answer.text))}
         except agent_runner.AgentRunError as exc:
-            # An expected, explainable failure: show it on the note; no retry.
+            # An expected, explainable failure: the note shows the reason. Raised
+            # again so the job list reports a failed job, not a success.
             logger.warning("generate_meeting_note: note %s failed: %s", note_id, exc)
             meeting_note_crud.fail_sync(session, note_id=nid, error=str(exc))
-            return {"status": "failed"}
+            raise
         except Exception as exc:
             logger.exception("generate_meeting_note: note %s failed", note_id)
             meeting_note_crud.fail_sync(

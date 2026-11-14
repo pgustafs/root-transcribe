@@ -719,10 +719,20 @@ Things to know:
   yourself nothing leaves your machines; with a hosted endpoint it does.
   Recordings marked *restricted* need the same explicit grant as an export.
 - The agent image is about 2.5 GB and the container uses about 0.6 GB of memory.
-- CUGA adds a prompt of roughly 4,500 tokens to every run, and a transcript is
-  sent in parts of at most `NOTES_MAX_INPUT_CHARS` characters (default 48,000,
-  about 12,000 tokens). Serve the model with a context window of 32,000 tokens
-  or more, or lower that setting.
+- **Context window.** CUGA adds a prompt of roughly 4,750 tokens to every run.
+  Serve the model with a context window of 32,000 tokens or more (vLLM:
+  `--max-model-len 32768`). The app reads the window from the server and sizes
+  the transcript parts to fit, up to `NOTES_MAX_INPUT_CHARS` (default 48,000
+  characters). Below 16,000 tokens a note fails straight away with that reason.
+- **Reasoning models.** The runner switches the model's "thinking" off
+  (`enable_thinking: false` in the chat template, as understood by vLLM and
+  llama.cpp), because thinking spends the answer budget and time without
+  improving a summary. Set `LLM_ENABLE_THINKING=true` on the `agent-runner`
+  container to allow it, or `default` for a server that rejects unknown request
+  fields.
+- The first note after a start downloads a small embedding model (about 130 MB,
+  `BAAI/bge-small-en-v1.5`) that CUGA loads; the container needs internet access
+  for that once per start.
 - Quality depends on the model. The feature has been tested end to end with a
   stand-in model only; try it with yours before relying on it.
 

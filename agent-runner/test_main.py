@@ -29,8 +29,42 @@ def use_agent(monkeypatch, invoke):
     return built
 
 
-def test_health_reports_the_model():
-    assert client.get("/health").json() == {"status": "ok", "model": "test-model"}
+def test_health_reports_the_model_and_its_context_window(monkeypatch):
+    monkeypatch.setattr(main, "context_tokens", lambda: 8192)
+    assert client.get("/health").json() == {
+        "status": "ok",
+        "model": "test-model",
+        "context_tokens": 8192,
+    }
+
+
+def test_no_text_from_the_model_is_an_explained_error(monkeypatch):
+    monkeypatch.setattr(main, "context_tokens", lambda: 8192)
+
+    async def invoke(text):
+        return SimpleNamespace(answer="No answer found", error=None, receipt=None)
+
+    use_agent(monkeypatch, invoke)
+    body = client.post("/run", json={"instructions": "x", "input": "y"}).json()
+    assert body["answer"] == ""
+    assert "returned no text" in body["error"] and "8,192 tokens" in body["error"]
+
+
+def test_thinking_is_switched_off_unless_asked_for(monkeypatch):
+    built = {}
+
+    class FakeChat:
+        def __init__(self, **kwargs):
+            built.update(kwargs)
+
+    monkeypatch.setattr(main, "ChatOpenAI", FakeChat)
+    monkeypatch.setattr(main, "CugaAgent", lambda **kwargs: kwargs)
+    main._build_agent("Summarize.")
+    assert built["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    monkeypatch.setattr(main, "THINKING", "default")
+    built.clear()
+    main._build_agent("Summarize.")
+    assert "extra_body" not in built
 
 
 def test_run_returns_the_answer_and_usage(monkeypatch):

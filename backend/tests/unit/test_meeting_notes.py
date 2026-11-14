@@ -18,9 +18,15 @@ pytestmark = pytest.mark.unit
 class FakeRunner:
     """Records every run; answers with a numbered document."""
 
-    def __init__(self, fail: Exception | None = None) -> None:
+    def __init__(
+        self, fail: Exception | None = None, context: int | None = None
+    ) -> None:
         self.calls: list[dict[str, str]] = []
         self.fail = fail
+        self.context = context
+
+    def context_tokens_sync(self) -> int | None:
+        return self.context
 
     def run_sync(self, *, instructions: str, text: str) -> AgentAnswer:
         self.calls.append({"instructions": instructions, "text": text})
@@ -194,12 +200,38 @@ def test_task_writes_the_note_with_speaker_names(
 def test_task_records_a_readable_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     session, note = _database_with_note()
     runner = FakeRunner(fail=AgentRunError("The agent service could not be reached."))
-    assert _run_task(monkeypatch, session, note, runner)["status"] == "failed"
+    # Raised, so the job list shows a failed job (not "Success").
+    with pytest.raises(AgentRunError):
+        _run_task(monkeypatch, session, note, runner)
     session.refresh(note)
     assert note.status == "failed"
     assert note.error == "The agent service could not be reached."
     assert note.content_markdown is None
     session.close()
+
+
+def test_task_refuses_a_model_with_too_small_a_context_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, note = _database_with_note()
+    runner = FakeRunner(context=8192)
+    with pytest.raises(AgentRunError, match="8,192 tokens"):
+        _run_task(monkeypatch, session, note, runner)
+    session.refresh(note)
+    assert note.status == "failed" and "at least 16,000" in note.error
+    assert runner.calls == []  # no model time spent on a run that cannot work
+    session.close()
+
+
+def test_parts_are_sized_to_the_served_context_window() -> None:
+    budget = meeting_notes.input_budget_chars
+    assert budget(None, "Summarize.", 48000) == 48000  # unknown: the setting
+    assert budget(131072, "Summarize.", 48000) == 48000  # roomy: the setting
+    small = budget(16000, "Summarize.", 48000)
+    assert 20000 < small < 27000  # (16000 - 5000 - 2000 - instructions) * 3
+    assert budget(16000, "x" * 9000, 48000) < small  # long instructions take room
+    with pytest.raises(meeting_notes.ContextTooSmall):
+        budget(8192, "Summarize.", 48000)
 
 
 def test_task_reraises_unexpected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -244,6 +276,21 @@ def test_agent_runner_client_maps_failures(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(agent_runner.httpx, "post", refuse)
     with pytest.raises(AgentRunError, match="could not be reached"):
         agent_runner.AgentRunner().run_sync(instructions="I", text="T")
+
+    def health(url, timeout):
+        assert url == "http://localhost:8011/health"
+        return httpx.Response(
+            200, json={"context_tokens": 32768}, request=httpx.Request("GET", url)
+        )
+
+    monkeypatch.setattr(agent_runner.httpx, "get", health)
+    assert agent_runner.AgentRunner().context_tokens_sync() == 32768
+
+    def down(url, timeout):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(agent_runner.httpx, "get", down)
+    assert agent_runner.AgentRunner().context_tokens_sync() is None
 
 
 def test_export_parses_the_markdown_people_write() -> None:

@@ -13,6 +13,48 @@ from app.services.agent_runner import AgentAnswer
 from app.services.note_defaults import OUTPUT_RULES
 from app.services.transcript_export import ExportSegment, _clock
 
+# The agent runtime (CUGA) puts its own prompt in front of every run, and the
+# answer needs room too. Measured: the prompt is about 4,750 tokens.
+AGENT_PROMPT_TOKENS = 5000
+ANSWER_TOKENS = 2000
+# Conservative: English runs near 4 characters per token, Swedish lower.
+CHARS_PER_TOKEN = 3
+# Below this the transcript would be cut into slivers and the merge step could
+# not hold their notes; better to say so than to return a poor document slowly.
+MIN_CONTEXT_TOKENS = 16000
+
+
+class ContextTooSmall(ValueError):
+    """The model's context window cannot hold a useful part of a transcript."""
+
+
+def input_budget_chars(
+    context_tokens: int | None, instructions: str, max_chars: int
+) -> int:
+    """How many transcript characters fit in one run.
+
+    ``max_chars`` is the configured ceiling; a known context window lowers it
+    so prompt + instructions + transcript + answer fit. Unknown window: trust
+    the setting.
+    """
+    if context_tokens is None:
+        return max_chars
+    if context_tokens < MIN_CONTEXT_TOKENS:
+        raise ContextTooSmall(
+            f"The language model is served with a context window of "
+            f"{context_tokens:,} tokens, which is too small for meeting notes: "
+            f"the agent's own prompt takes about {AGENT_PROMPT_TOKENS:,} and the "
+            f"transcript and the answer need the rest. Serve the model with at "
+            f"least {MIN_CONTEXT_TOKENS:,} tokens of context (32,000 recommended)."
+        )
+    room = (
+        context_tokens
+        - AGENT_PROMPT_TOKENS
+        - ANSWER_TOKENS
+        - (len(instructions) + len(OUTPUT_RULES)) // CHARS_PER_TOKEN
+    )
+    return max(2000, min(max_chars, room * CHARS_PER_TOKEN))
+
 
 def transcript_lines(segments: list[ExportSegment]) -> list[str]:
     """``[H:MM:SS] Speaker: text`` — one line per speaker turn."""

@@ -28,6 +28,19 @@ class AgentAnswer:
 
 
 class AgentRunner:
+    def context_tokens_sync(self) -> int | None:
+        """The model's context window in tokens, when the LLM server reports
+        one (the runner asks it). None = unknown, or the runner is not up yet;
+        a run then finds out the hard way."""
+        try:
+            response = httpx.get(
+                f"{settings.AGENT_RUNNER_URL.rstrip('/')}/health", timeout=20
+            )
+            value = response.json().get("context_tokens")
+        except (httpx.HTTPError, ValueError):
+            return None
+        return value if isinstance(value, int) and value > 0 else None
+
     def run_sync(self, *, instructions: str, text: str) -> AgentAnswer:
         """One agent run. Raises :class:`AgentRunError` with a readable reason."""
         timeout = float(settings.NOTES_TIMEOUT_SECONDS)
