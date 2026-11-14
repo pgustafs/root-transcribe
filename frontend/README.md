@@ -64,8 +64,8 @@ navy `#0D1835`, turquoise `#00C2CB`, mist `#F4F6FA`, and green/orange accents.
 [BrandMark.tsx](src/components/BrandMark.tsx) renders the three-arc mark and the
 favicon is bundled in `public/`. In dark mode, the header and sidebar share
 `#09122A`, the page uses `#0D1835`, and cards use `#13204A`.
-Poppins headings, Lato body text and JetBrains Mono are bundled locally through
-Fontsource; their licenses are under `public/fonts/`. Small accent text uses a
+Poppins headings and Lato body text are bundled from `src/assets/fonts/`, JetBrains
+Mono through Fontsource; their licenses are under `public/fonts/`. Small accent text uses a
 darker turquoise in light mode for contrast. Components use semantic theme tokens.
 
 ## Verification

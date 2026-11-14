@@ -1,0 +1,240 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* ── enrooted identity (grafisk identitet 2026-10-29v2) ────────────────────────
+   Fonts (TYP-1): Poppins 500/600 for headings, labels and buttons; Lato 400/700
+   (+ italic) for body text. Only these weights. The files are the brand originals,
+   bundled so the UI works without internet access. JetBrains Mono (code) isn't
+   bundled; the stack falls back to the system monospace font. */
+@font-face { font-family: "Poppins"; font-weight: 500; font-style: normal; font-display: swap; src: url("./assets/fonts/Poppins-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Poppins"; font-weight: 600; font-style: normal; font-display: swap; src: url("./assets/fonts/Poppins-SemiBold.ttf") format("truetype"); }
+@font-face { font-family: "Lato"; font-weight: 400; font-style: normal; font-display: swap; src: url("./assets/fonts/Lato-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Lato"; font-weight: 700; font-style: normal; font-display: swap; src: url("./assets/fonts/Lato-Bold.ttf") format("truetype"); }
+@font-face { font-family: "Lato"; font-weight: 400; font-style: italic; font-display: swap; src: url("./assets/fonts/Lato-Italic.ttf") format("truetype"); }
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: Poppins, Montserrat, system-ui, sans-serif;
+    --font-sans: Lato, "Open Sans", Calibri, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --color-link: var(--link);
+    --color-accent-line: var(--accent-line);
+    --color-body: var(--body-text);
+    --color-status-ok: var(--status-ok);
+    --color-status-warn: var(--status-warn);
+    --color-on-accent: var(--on-accent);
+    /* error/warning *text*: orange is never a text colour (FARG-4), so the words
+       stay in the normal text colour and the orange goes on the surface/border/icon. */
+    --color-warn-text: var(--foreground);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Palette (FARG-1): navy #0D1835, white, turquoise #00C2CB / dark #00A0A8 /
+   link #00787E, green #22C55E (OK), orange #FF7A00 (warning/error), light grey
+   #F4F6FA, navy 20 % #CFD3DD, navy 80 % #3D4560, secondary-on-dark #A8B2CA.
+   Light mode = the "vit" theme, dark mode = the "navy" theme (KON-3 pairs only).
+   Text on turquoise/green/orange surfaces is always navy, never white (KON-2).
+   Orange is a surface/border/icon colour only, never text (FARG-4), so
+   "destructive" components are restyled as orange surfaces with navy text. */
+:root {
+    --background: #FFFFFF;
+    --foreground: #0D1835;
+    --body-text: #3D4560;
+    --card: #FFFFFF;
+    --card-foreground: #0D1835;
+    --popover: #FFFFFF;
+    --popover-foreground: #0D1835;
+    --primary: #00C2CB;
+    --primary-foreground: #0D1835;
+    --on-accent: #0D1835;
+    --secondary: #F4F6FA;
+    --secondary-foreground: #0D1835;
+    --muted: #F4F6FA;
+    --muted-foreground: #3D4560;
+    --accent: rgba(0, 194, 203, 0.08);      /* hover tone (beslut I, not in the rule registry) */
+    --accent-foreground: #0D1835;
+    --destructive: #FF7A00;
+    --status-ok: #22C55E;
+    --status-warn: #FF7A00;
+    --border: #CFD3DD;
+    --input: #CFD3DD;
+    --ring: #00787E;                         /* focus: turquoise link tone on light */
+    --link: #00787E;
+    --accent-line: #00A0A8;
+    --chart-1: #00C2CB;
+    --chart-2: #22C55E;
+    --chart-3: #FF7A00;
+    --chart-4: #3D4560;
+    --chart-5: #CFD3DD;
+    --radius: 0.5rem;                        /* 8 px buttons; rounded-xl ≈ 12 px cards (WEB-1) */
+    --sidebar: #F4F6FA;
+    --sidebar-foreground: #0D1835;
+    --sidebar-primary: #00C2CB;
+    --sidebar-primary-foreground: #0D1835;
+    --sidebar-accent: rgba(0, 194, 203, 0.08);
+    --sidebar-accent-foreground: #0D1835;
+    --sidebar-border: #CFD3DD;
+    --sidebar-ring: #00787E;
+}
+
+.dark {
+    --background: #0D1835;
+    --foreground: #FFFFFF;
+    --body-text: #FFFFFF;
+    --card: #0D1835;                         /* navy card on navy, edged in navy 80 % */
+    --card-foreground: #FFFFFF;
+    --popover: #0D1835;
+    --popover-foreground: #FFFFFF;
+    --primary: #00C2CB;
+    --primary-foreground: #0D1835;
+    --secondary: #1A2542;                    /* raised navy surface (derived, not in the rule registry) */
+    --secondary-foreground: #FFFFFF;
+    --muted: #1A2542;
+    --muted-foreground: #A8B2CA;
+    --accent: rgba(0, 194, 203, 0.12);
+    --accent-foreground: #FFFFFF;
+    --destructive: #FF7A00;
+    --border: #3D4560;
+    --input: #3D4560;
+    --ring: #00C2CB;
+    --link: #00C2CB;
+    --accent-line: #00C2CB;
+    --sidebar: #0D1835;
+    --sidebar-foreground: #FFFFFF;
+    --sidebar-primary: #00C2CB;
+    --sidebar-primary-foreground: #0D1835;
+    --sidebar-accent: rgba(0, 194, 203, 0.12);
+    --sidebar-accent-foreground: #FFFFFF;
+    --sidebar-border: #3D4560;
+    --sidebar-ring: #00C2CB;
+    color-scheme: dark;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  html {
+    @apply font-sans;
+  }
+  /* Poppins for headings and UI labels (TYP-1: H1–H3, etikett): shadcn Buttons,
+     tabs, labels, titles, badges. Raw <button>s that wrap content (trace rows,
+     conversation items) keep Lato, which reads as body text. */
+  h1, h2, h3, h4, h5, h6, [data-slot="button"], [role="tab"], label, th,
+  [data-slot="dialog-title"], [data-slot="alert-dialog-title"], [data-slot="sheet-title"],
+  [data-slot="card-title"], [data-slot="badge"], [data-slot="dropdown-menu-label"] {
+    font-family: var(--font-heading);
+  }
+  /* Lato has no 500/600: CSS font matching already picks 400 for medium and
+     700 for semibold, so only the allowed weights are ever rendered. */
+  /* Cards and bubbles carry no shadow; depth comes from the glass surfaces below. */
+  [data-slot="card"], [data-slot="bubble-content"] { box-shadow: none; }
+}
+
+/* Loading indicator (TRI-3): the tri-colour trilogin, 360° in 2.4 s, linear.
+   The only rotation the identity allows. */
+@keyframes enrooted-spin { to { transform: rotate(360deg); } }
+.enrooted-spin { animation: enrooted-spin 2.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .enrooted-spin { animation-duration: 6s; } }
+
+/* ── Glass surfaces (after OpenClaw's two tiers) ──────────────────────────────
+   Requested on 2026-11-13 as a deliberate exception to the enrooted identity's
+   "flat, no blur, no gradients" rule (identitet §6). Colours are still only the
+   enrooted palette. These rules sit outside Tailwind's layers on purpose, so
+   they win over the components' own bg-* utilities.
+
+   Backdrop: two soft washes of turquoise and green behind the whole app, so
+   the glass has something to refract. */
+:root {
+    --glass-blur: blur(12px) saturate(1.6);
+    --glass-chrome: color-mix(in srgb, var(--sidebar) 70%, transparent);
+    --glass-card: color-mix(in srgb, var(--card) 72%, transparent);
+    --glass-popover: color-mix(in srgb, var(--popover) 80%, transparent);
+    --backdrop-1: rgba(0, 194, 203, 0.16);
+    --backdrop-2: rgba(34, 197, 94, 0.10);
+}
+.dark {
+    --glass-chrome: color-mix(in srgb, #1A2542 55%, transparent);
+    --glass-card: color-mix(in srgb, #1A2542 68%, transparent);
+    --glass-popover: color-mix(in srgb, #1A2542 82%, transparent);
+    --backdrop-1: rgba(0, 194, 203, 0.20);
+    --backdrop-2: rgba(34, 197, 94, 0.12);
+}
+.app-backdrop {
+    background-color: var(--background);
+    background-image:
+        radial-gradient(52rem 34rem at 78% -8%, var(--backdrop-1), transparent 62%),
+        radial-gradient(46rem 32rem at 12% 108%, var(--backdrop-2), transparent 60%);
+}
+/* Tier 1: navigation chrome (rail, conversation list, title bar, agent panel). */
+.glass-chrome {
+    background: var(--glass-chrome);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+}
+/* Tier 2: cards that float over content (composer, slash-command list). */
+.glass-card {
+    background: var(--glass-card);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+}
+/* Menus, popovers, dialogs and drawers. */
+[data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"],
+[data-slot="select-content"], [data-slot="hover-card-content"], [data-slot="dialog-content"],
+[data-slot="alert-dialog-content"], [data-slot="sheet-content"] {
+    background: var(--glass-popover);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+}
+/* Browsers without backdrop-filter get near-opaque surfaces, so text stays readable. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root { --glass-chrome: var(--sidebar); --glass-card: var(--card); --glass-popover: var(--popover); }
+    .dark { --glass-chrome: #1A2542; --glass-card: #1A2542; --glass-popover: #1A2542; }
+}
+
+/* Toasts: the words stay in the normal text colour; only the icon shows status. */
+[data-sonner-toast][data-type="success"] [data-icon] { color: var(--status-ok); }
+[data-sonner-toast][data-type="error"] [data-icon],
+[data-sonner-toast][data-type="warning"] [data-icon] { color: var(--status-warn); }

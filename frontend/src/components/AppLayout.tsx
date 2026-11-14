@@ -1,7 +1,9 @@
 /*
  * enrooted glass app shell (after the enrooted-glass-ui skill's app-shell):
- * 52 px icon rail · 272 px list panel · main column under a floating 48 px glass
- * title bar. Under 768 px the rail and list share one left drawer.
+ * one left sidebar · main column under a floating 48 px glass title bar.
+ * This app has only navigation to show, so the sidebar is EITHER the 52 px icon
+ * rail (collapsed) OR the 272 px menu with labels (expanded), never both side
+ * by side. Under 768 px the menu is a left drawer and there is no rail.
  */
 import {
   useEffect,
@@ -58,7 +60,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-const BP_DOCK_LEFT = 768; // below: rail + list live in a drawer
+const BP_DOCK_LEFT = 768; // below: the menu lives in a drawer
 
 function useDockedLeft() {
   const [docked, setDocked] = useState(() => window.innerWidth >= BP_DOCK_LEFT);
@@ -198,10 +200,41 @@ export function AppLayout() {
     .slice(0, 1)
     .toUpperCase();
 
+  const accountMenu = (side: "right" | "top") => (
+    <DropdownMenuContent
+      side={side}
+      align={side === "right" ? "end" : "start"}
+      className="min-w-56"
+    >
+      <DropdownMenuLabel className="truncate font-normal text-muted-foreground">
+        {user?.email}
+      </DropdownMenuLabel>
+      <DropdownMenuGroup>
+        <DropdownMenuItem asChild>
+          <Link to="/profile">
+            <UserIcon />
+            {t("masthead.myProfile")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => void logout()}>
+          <LogOutIcon />
+          {t("masthead.logout")}
+        </DropdownMenuItem>
+      </DropdownMenuGroup>
+    </DropdownMenuContent>
+  );
+  const avatar = (
+    <Avatar className="size-7">
+      <AvatarImage src={user?.avatar_url ?? undefined} alt="" />
+      <AvatarFallback className="text-xs">{initial}</AvatarFallback>
+    </Avatar>
+  );
+
   const rail = (
     <nav
       aria-label={t("nav.primary")}
-      className="flex w-13 shrink-0 flex-col items-center gap-2 border-r px-1 py-2"
+      className="flex w-13 shrink-0 flex-col items-center gap-2 px-1 py-2"
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -231,12 +264,7 @@ export function AppLayout() {
                   aria-label={accountLabel}
                   className="rounded-full"
                 >
-                  <Avatar className="size-7">
-                    <AvatarImage src={user?.avatar_url ?? undefined} alt="" />
-                    <AvatarFallback className="text-xs">
-                      {initial}
-                    </AvatarFallback>
-                  </Avatar>
+                  {avatar}
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
@@ -244,32 +272,15 @@ export function AppLayout() {
               {user?.email ?? t("masthead.account")}
             </TooltipContent>
           </Tooltip>
-          <DropdownMenuContent side="right" align="end" className="min-w-56">
-            <DropdownMenuLabel className="truncate font-normal text-muted-foreground">
-              {user?.email}
-            </DropdownMenuLabel>
-            <DropdownMenuGroup>
-              <DropdownMenuItem asChild>
-                <Link to="/profile">
-                  <UserIcon />
-                  {t("masthead.myProfile")}
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => void logout()}>
-                <LogOutIcon />
-                {t("masthead.logout")}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
+          {accountMenu("right")}
         </DropdownMenu>
       </div>
     </nav>
   );
 
   const closeLabel = t("nav.closeMenu");
-  const listPanel = (
-    <div className="flex h-full min-h-0 flex-col">
+  const menuPanel = (
+    <nav aria-label={t("nav.primary")} className="flex h-full min-h-0 flex-col">
       <div className="flex h-12 shrink-0 items-center justify-between gap-2 pr-2 pl-3">
         <Lockup to="/workspaces" />
         <Button
@@ -304,12 +315,28 @@ export function AppLayout() {
           </section>
         )}
       </div>
-      <div className="flex h-10 shrink-0 items-center px-2">
-        <ul className="w-full">
-          <ListRow link={profileLink} selected={isSelected(profileLink.to)} />
-        </ul>
+      <div className="flex shrink-0 items-center gap-1 border-t p-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              aria-label={accountLabel}
+              className={cn(
+                "h-9 min-w-0 flex-1 justify-start gap-2.5 px-1.5 font-normal",
+                isSelected(profileLink.to) && "bg-foreground/8",
+              )}
+            >
+              {avatar}
+              <span className="truncate text-sm">
+                {user?.full_name ?? user?.email ?? t("masthead.account")}
+              </span>
+            </Button>
+          </DropdownMenuTrigger>
+          {accountMenu("top")}
+        </DropdownMenu>
+        <ThemeToggle />
       </div>
-    </div>
+    </nav>
   );
 
   const iconButton = (label: string, icon: ReactNode, onClick: () => void) => (
@@ -334,17 +361,15 @@ export function AppLayout() {
       <a href="#main-content" className="skip-link">
         {t("masthead.skipToContent")}
       </a>
-      {leftDocked && <div className="glass-chrome flex shrink-0">{rail}</div>}
+      {/* One sidebar: the menu when open, the icon rail when collapsed. */}
       {leftDocked && (
         <aside
-          aria-label={t("nav.menu")}
           className={cn(
-            "glass-chrome shrink-0 overflow-hidden border-r transition-[width] duration-200",
-            listOpen ? "w-68" : "w-0 border-r-0",
+            "glass-chrome flex shrink-0 overflow-hidden border-r transition-[width] duration-200",
+            listOpen ? "w-68" : "w-13",
           )}
-          inert={!listOpen || undefined}
         >
-          <div className="h-full w-68">{listPanel}</div>
+          {listOpen ? <div className="h-full w-68">{menuPanel}</div> : rail}
         </aside>
       )}
 
@@ -406,21 +431,20 @@ export function AppLayout() {
         </div>
       </main>
 
-      {/* Phones: rail and list share one drawer. */}
+      {/* Phones: the menu is a drawer; there is no rail. */}
       {!leftDocked && (
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
           <SheetContent
             side="left"
             showCloseButton={false}
             onOpenAutoFocus={(e) => e.preventDefault()}
-            className="w-[21rem] max-w-[92vw] flex-row gap-0 p-0"
+            className="w-68 max-w-[92vw] gap-0 p-0"
           >
             <SheetTitle className="sr-only">{t("nav.menu")}</SheetTitle>
             <SheetDescription className="sr-only">
               {t("nav.primary")}
             </SheetDescription>
-            {rail}
-            <div className="min-w-0 flex-1">{listPanel}</div>
+            {menuPanel}
           </SheetContent>
         </Sheet>
       )}

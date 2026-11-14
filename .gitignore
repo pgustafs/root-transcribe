@@ -1,5 +1,6 @@
-# Claude Code local settings / session data
-.claude/
+# Claude Code: local settings and session data stay out; project skills are shared.
+.claude/*
+!.claude/skills/
 
 # Scratch / screenshots
 tmp/
