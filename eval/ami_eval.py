@@ -33,6 +33,9 @@ import json
 import os
 import re
 import secrets
+import shutil
+import ssl
+import subprocess
 import sys
 import time
 import urllib.error
@@ -79,8 +82,33 @@ def download(url: str, target: Path) -> Path:
             return target
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last = str(exc)
+            if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
+                # This Python has no certificate authorities installed (usual for
+                # the python.org build on macOS). curl uses the system's, so the
+                # server is still verified.
+                if _curl(url, partial):
+                    partial.replace(target)
+                    return target
+                raise EvalError(
+                    f"Could not download {url}: this Python cannot verify HTTPS certificates "
+                    "and curl did not succeed either. On macOS, run the 'Install Certificates.command' "
+                    "that came with Python, or download the file yourself and save it as\n  " + str(target)
+                ) from None
             time.sleep(2 * attempt)
     raise EvalError(f"Could not download {url}: {last}")
+
+
+def _curl(url: str, target: Path) -> bool:
+    curl = shutil.which("curl")
+    if not curl:
+        return False
+    print("  Python has no HTTPS certificates installed; downloading with curl instead.")
+    for _ in range(5):  # the AMI server answers 403 now and then
+        done = subprocess.run([curl, "--fail", "--location", "--silent", "--show-error", "-o", str(target), url])
+        if done.returncode == 0 and target.stat().st_size > 0:
+            return True
+        time.sleep(3)
+    return False
 
 
 def trim_wav(source: Path, target: Path, seconds: float) -> float:
