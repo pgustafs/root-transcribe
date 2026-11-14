@@ -360,7 +360,7 @@ The pod and its volumes also appear in Podman Desktop.
   reached from the containers as `host.containers.internal`.
 - Optional environment variables: `STT_API_KEY` if the server needs a key,
   `STT_MODEL` if it serves several models, `REBUILD=1` after pulling new code.
-- Stop with `./deploy/start.sh stop deploy/root-transcribe.mac.local.yaml`;
+- Stop with `./deploy/start.sh stop`;
   data is kept. Logs: `./deploy/start.sh logs backend` (or `stt-worker`, `keycloak`).
 - Speaker detection runs on the CPU inside Podman's Linux machine, so long
   recordings take longer than on a GPU host. The Mac build therefore installs

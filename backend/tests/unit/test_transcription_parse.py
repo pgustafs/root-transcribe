@@ -123,3 +123,69 @@ def test_transcription_request_language(language, from_file, tmp_path):
         assert sent is NOT_GIVEN  # no language field on the HTTP request
     else:
         assert sent == language
+
+
+def _status_error(status: int):
+    import httpx
+    from openai import APIStatusError
+
+    request = httpx.Request("POST", "http://stt.invalid/v1/audio/transcriptions")
+    return APIStatusError(
+        "boom", response=httpx.Response(status, request=request), body=None
+    )
+
+
+def _service_with(create):
+    from types import SimpleNamespace
+
+    from app.services.transcription import TranscriptionService
+
+    service = TranscriptionService()
+    service._client = SimpleNamespace(
+        audio=SimpleNamespace(transcriptions=SimpleNamespace(create=create))
+    )
+    return service
+
+
+@pytest.mark.parametrize("from_file", [False, True])
+def test_plain_text_fallback_when_timestamps_are_rejected(from_file, tmp_path):
+    """A server that fails ``verbose_json`` (vllm-metal: HTTP 500) still yields
+    text, and later calls skip the request that is known to fail."""
+    formats: list[str] = []
+
+    def create(**kwargs):
+        formats.append(kwargs["response_format"])
+        if kwargs["response_format"] == "verbose_json":
+            kwargs["file"][1].read() if from_file else kwargs["file"].read()
+            raise _status_error(500)
+        handle = kwargs["file"][1] if from_file else kwargs["file"]
+        assert handle.read() == b"audio"  # rewound before the second attempt
+        return {"text": "hej"}
+
+    service = _service_with(create)
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
+
+    def call():
+        if from_file:
+            return service.transcribe_file_sync(str(audio), "audio.wav")
+        return service.transcribe_sync(b"audio", "turn.wav")
+
+    first = call()
+    assert first.text == "hej"
+    assert first.words == [] and first.has_word_timestamps is False
+    assert call().text == "hej"
+    assert formats == ["verbose_json", "json", "json"]
+
+
+def test_failing_server_reports_the_original_error():
+    from openai import APIStatusError
+
+    def create(**kwargs):
+        raise _status_error(503 if kwargs["response_format"] == "json" else 500)
+
+    service = _service_with(create)
+    with pytest.raises(APIStatusError) as caught:
+        service.transcribe_sync(b"audio", "turn.wav")
+    assert caught.value.status_code == 500
+    assert service._plain_text_until == 0.0

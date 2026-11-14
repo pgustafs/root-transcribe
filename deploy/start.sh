@@ -5,6 +5,11 @@ repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_dir"
 action="${1:-start}"
 manifest="${2:-deploy/root-transcribe.local.yaml}"
+# Started with mac.sh: stop without naming the Mac manifest.
+if [ "$action" = stop ] && [ "$#" -lt 2 ] && [ ! -f "$manifest" ] &&
+  [ -f deploy/root-transcribe.mac.local.yaml ]; then
+  manifest=deploy/root-transcribe.mac.local.yaml
+fi
 case "$action" in
   init)
     if [ ! -f deploy/settings.env ]; then

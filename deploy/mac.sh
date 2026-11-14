@@ -8,7 +8,7 @@
 # the saved `hf auth login`, the model name is asked from the endpoint, and
 # passwords are generated once into deploy/secrets.local.json.
 # Optional environment: STT_API_KEY, STT_MODEL (skips detection), REBUILD=1.
-# Stop:  ./deploy/start.sh stop deploy/root-transcribe.mac.local.yaml
+# Stop:  ./deploy/start.sh stop
 set -eu
 
 usage() {
@@ -25,6 +25,17 @@ case "$1" in
   http://*|https://*) stt_url=$1 ;;
   *) usage ;;
 esac
+
+# An endpoint on this Mac: check that it answers here before building anything.
+case "$stt_url" in
+  http://localhost*|http://127.0.0.1*|https://localhost*|https://127.0.0.1*) local_stt=true ;;
+  *) local_stt=false ;;
+esac
+if [ "$local_stt" = true ]; then
+  curl --silent --max-time 5 -o /dev/null "$stt_url" ||
+    fail "Nothing answers at $stt_url on this Mac. Start the speech-to-text server
+  and wait until it has finished loading the model, then run this again."
+fi
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_dir"
@@ -76,7 +87,17 @@ podman run --rm --user 0 --security-opt label=disable --entrypoint python3 \
   -e HF_TOKEN -e STT_API_KEY="${STT_API_KEY:-}" -e STT_MODEL="${STT_MODEL:-}" \
   -v "$repo_dir/deploy:/deploy" localhost/root-transcribe:latest \
   /deploy/configure.py --stt-url "$stt_url" --arch arm64 ||
-  fail "Could not generate the configuration (details above)."
+  {
+    if [ "$local_stt" = true ]; then
+      printf '%s\n' "" \
+        "If the error above says the endpoint cannot be reached: it answers on this" \
+        "Mac but not from the containers. Start the speech-to-text server with" \
+        "--host 0.0.0.0 instead of 127.0.0.1 and run this again. If that is not" \
+        "enough, pass the Mac's network address instead of" \
+        "localhost:  $0 http://\$(ipconfig getifaddr en0):<port>/v1" >&2
+    fi
+    fail "Could not generate the configuration (details above)."
+  }
 
 # 5. Start, replacing a previous run. Data volumes are kept.
 podman kube play --replace "$manifest" >/dev/null ||
@@ -99,7 +120,7 @@ Root Transcribe is running: $app_url
   Sign in as:        admin@example.com
   Initial password:  KEYCLOAK_APP_ADMIN_PASSWORD in deploy/secrets.local.json
                      (you are asked to change it at first sign-in)
-  Stop:              ./deploy/start.sh stop $manifest
+  Stop:              ./deploy/start.sh stop
   Logs:              ./deploy/start.sh logs backend
 
 The first transcription downloads the speaker models and takes longer.

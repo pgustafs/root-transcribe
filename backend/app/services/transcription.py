@@ -1,15 +1,19 @@
 """OpenAI-compatible speech-to-text client for the dedicated STT_BASE_URL.
 
 Requests word timestamps, with segment-timestamp fallback for the original
-per-diarization-turn pipeline. No ASR model runs in the API process."""
+per-diarization-turn pipeline. Servers that cannot produce timestamps at all
+(they reject ``verbose_json``) are asked for plain text instead, which the
+per-turn pipeline also handles. No ASR model runs in the API process."""
 
 from __future__ import annotations
 
 import io
 import logging
+import time
 from dataclasses import dataclass, field
+from typing import BinaryIO
 
-from openai import NOT_GIVEN, OpenAI
+from openai import NOT_GIVEN, APIStatusError, OpenAI
 
 from app.core.config import settings
 from app.core.logging import log_operation
@@ -19,6 +23,10 @@ from app.services.transcript_align import Word
 _NO_KEY = "not-needed"
 
 logger = logging.getLogger("app.services.transcription")
+
+# After a server rejects the timestamp request, skip it for this long so every
+# later slice does not pay for a request that is known to fail.
+_PLAIN_TEXT_ONLY_SECONDS = 600.0
 
 
 @dataclass
@@ -41,6 +49,7 @@ class TranscriptionService:
 
     def __init__(self) -> None:
         self._client: OpenAI | None = None
+        self._plain_text_until = 0.0
 
     def _sync(self) -> OpenAI:
         if self._client is None:
@@ -55,6 +64,46 @@ class TranscriptionService:
             )
         return self._client
 
+    def _request(
+        self, file: BinaryIO | tuple[str, BinaryIO], language: str | None
+    ) -> object:
+        """Ask for timestamps; fall back to plain text when the server cannot.
+
+        Some OpenAI-compatible servers transcribe correctly but fail any
+        ``verbose_json`` request (vllm-metal answers HTTP 500). Plain ``json``
+        returns the text only, which is all per-turn transcription needs.
+        """
+        create = self._sync().audio.transcriptions.create
+        common = {
+            "model": settings.STT_MODEL,
+            "file": file,
+            "language": language if language is not None else NOT_GIVEN,
+        }
+        if time.monotonic() >= self._plain_text_until:
+            try:
+                return create(
+                    **common,
+                    response_format="verbose_json",
+                    timestamp_granularities=["word", "segment"],
+                )
+            except APIStatusError as exc:
+                handle = file[1] if isinstance(file, tuple) else file
+                handle.seek(0)
+                try:
+                    response = create(**common, response_format="json")
+                except APIStatusError:
+                    raise exc from None  # the server is failing, not the format
+                self._plain_text_until = time.monotonic() + _PLAIN_TEXT_ONLY_SECONDS
+                logger.warning(
+                    "STT server rejected the timestamp request; using plain text",
+                    extra={
+                        "operation": "stt.plain_text_fallback",
+                        "status": exc.status_code,
+                    },
+                )
+                return response
+        return create(**common, response_format="json")
+
     def transcribe_file_sync(
         self, path: str, filename: str, *, language: str | None = None
     ) -> TranscriptionResult:
@@ -64,13 +113,7 @@ class TranscriptionService:
             open(path, "rb") as fh,
             log_operation(logger, "stt.transcribe", model=settings.STT_MODEL),
         ):
-            response = self._sync().audio.transcriptions.create(
-                model=settings.STT_MODEL,
-                file=(filename, fh),
-                language=language if language is not None else NOT_GIVEN,
-                response_format="verbose_json",
-                timestamp_granularities=["word", "segment"],
-            )
+            response = self._request((filename, fh), language)
         return _parse_response(response)
 
     def transcribe_sync(
@@ -82,13 +125,7 @@ class TranscriptionService:
         with log_operation(
             logger, "stt.transcribe", model=settings.STT_MODEL, bytes=len(audio)
         ):
-            response = self._sync().audio.transcriptions.create(
-                model=settings.STT_MODEL,
-                file=buffer,
-                language=language if language is not None else NOT_GIVEN,
-                response_format="verbose_json",
-                timestamp_granularities=["word", "segment"],
-            )
+            response = self._request(buffer, language)
         return _parse_response(response)
 
 
