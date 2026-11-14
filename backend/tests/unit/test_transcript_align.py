@@ -8,6 +8,7 @@ from app.services.transcript_align import (
     Segment,
     SpeakerTurn,
     Word,
+    absorb_slivers,
     align,
     assign_speaker,
     overlap,
@@ -84,3 +85,58 @@ def test_align_splits_when_speaker_returns() -> None:
 
 def test_align_empty_words() -> None:
     assert align([], [SpeakerTurn("SPEAKER_00", 0, 1)]) == []
+
+
+def test_absorb_slivers_folds_a_blip_inside_one_speaker() -> None:
+    turns = [
+        SpeakerTurn("SPEAKER_00", 0.0, 3.0),
+        SpeakerTurn("SPEAKER_01", 3.0, 3.4),
+        SpeakerTurn("SPEAKER_00", 3.4, 7.0),
+    ]
+    assert absorb_slivers(turns) == [SpeakerTurn("SPEAKER_00", 0.0, 7.0)]
+
+
+def test_absorb_slivers_keeps_real_interjections() -> None:
+    paused = [  # the first speaker stops; a pause surrounds the reply
+        SpeakerTurn("SPEAKER_00", 0.0, 3.0),
+        SpeakerTurn("SPEAKER_01", 3.4, 3.8),
+        SpeakerTurn("SPEAKER_00", 4.3, 7.0),
+    ]
+    assert absorb_slivers(paused) == paused
+    longer = [  # too long to be a blip
+        SpeakerTurn("SPEAKER_00", 0.0, 3.0),
+        SpeakerTurn("SPEAKER_01", 3.0, 4.0),
+        SpeakerTurn("SPEAKER_00", 4.0, 7.0),
+    ]
+    assert absorb_slivers(longer) == longer
+    between_others = [  # short, but between two different speakers
+        SpeakerTurn("SPEAKER_00", 0.0, 3.0),
+        SpeakerTurn("SPEAKER_01", 3.0, 3.3),
+        SpeakerTurn("SPEAKER_02", 3.3, 7.0),
+    ]
+    assert absorb_slivers(between_others) == between_others
+
+
+def test_diarization_prefers_exclusive_turns() -> None:
+    from types import SimpleNamespace
+
+    from app.services.diarization import DiarizationService
+
+    def annotation(*tracks):
+        return SimpleNamespace(
+            itertracks=lambda yield_label: [
+                (SimpleNamespace(start=a, end=b), None, label) for a, b, label in tracks
+            ]
+        )
+
+    service = DiarizationService()
+    service._pipeline = lambda audio: SimpleNamespace(
+        speaker_diarization=annotation(
+            (0.0, 7.0, "SPEAKER_00"), (0.1, 0.6, "SPEAKER_01"), (3.0, 3.6, "SPEAKER_01")
+        ),
+        exclusive_speaker_diarization=annotation((0.0, 7.0, "SPEAKER_00")),
+    )
+    assert service.diarize_sync({}) == [SpeakerTurn("SPEAKER_00", 0.0, 7.0)]
+    # Older pipelines return the annotation itself.
+    service._pipeline = lambda audio: annotation((1.0, 2.0, "SPEAKER_00"))
+    assert service.diarize_sync({}) == [SpeakerTurn("SPEAKER_00", 1.0, 2.0)]

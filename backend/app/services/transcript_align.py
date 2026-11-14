@@ -33,6 +33,40 @@ class SpeakerTurn:
     end: float
 
 
+def absorb_slivers(
+    turns: Sequence[SpeakerTurn], *, max_sliver: float = 0.5, max_gap: float = 0.1
+) -> list[SpeakerTurn]:
+    """Fold a brief other-speaker blip inside one person's speech back into it.
+
+    Diarization sometimes labels a fraction of a second in the middle of one
+    person's sentence as another speaker. Transcribed on its own, that blip
+    becomes a garbage line under a speaker who does not exist. A turn of at
+    most ``max_sliver`` seconds that sits directly between two turns of the same
+    other speaker (gaps of at most ``max_gap``) is treated as that speaker's
+    speech: the three turns become one. A short turn with a pause around it, or
+    between two different speakers, is a real interjection and is kept.
+    """
+    out: list[SpeakerTurn] = []
+    ordered = sorted(turns, key=lambda t: (t.start, t.end))
+    i = 0
+    while i < len(ordered):
+        turn = ordered[i]
+        if out and i + 1 < len(ordered):
+            prev, nxt = out[-1], ordered[i + 1]
+            if (
+                prev.speaker == nxt.speaker != turn.speaker
+                and turn.end - turn.start <= max_sliver
+                and turn.start - prev.end <= max_gap
+                and nxt.start - turn.end <= max_gap
+            ):
+                out[-1] = SpeakerTurn(prev.speaker, prev.start, max(prev.end, nxt.end))
+                i += 2
+                continue
+        out.append(turn)
+        i += 1
+    return out
+
+
 @dataclass(frozen=True)
 class Segment:
     """A contiguous same-speaker span of transcript."""

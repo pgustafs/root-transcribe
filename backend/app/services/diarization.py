@@ -23,7 +23,7 @@ import tempfile
 
 from app.core.config import settings
 from app.core.logging import log_operation
-from app.services.transcript_align import SpeakerTurn
+from app.services.transcript_align import SpeakerTurn, absorb_slivers
 
 logger = logging.getLogger("app.services.diarization")
 
@@ -195,16 +195,19 @@ class DiarizationService:
         pipeline = self._load()
         with log_operation(logger, "diarization.run"):
             output = pipeline(audio)
-        # pyannote 4.x community pipelines return a ``DiarizeOutput`` wrapper whose
-        # ``.speaker_diarization`` is the ``Annotation``; older pipelines return the
-        # Annotation directly. Handle both.
-        annotation = getattr(output, "speaker_diarization", output)
+        # pyannote 4.x community pipelines return a ``DiarizeOutput`` wrapper;
+        # older pipelines return the ``Annotation`` directly. Prefer the wrapper's
+        # EXCLUSIVE diarization (one speaker at a time): the regular one allows
+        # overlapping turns, and a short overlapped turn transcribed on its own
+        # repeats the main speaker's words under a second, non-existent speaker.
+        annotation = getattr(output, "exclusive_speaker_diarization", None)
+        if annotation is None:
+            annotation = getattr(output, "speaker_diarization", output)
         turns = [
             SpeakerTurn(speaker=str(label), start=float(seg.start), end=float(seg.end))
             for seg, _, label in annotation.itertracks(yield_label=True)
         ]
-        turns.sort(key=lambda t: t.start)
-        return turns
+        return absorb_slivers(turns)
 
 
 class SpeakerEmbeddingService:
