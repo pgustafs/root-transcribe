@@ -12,7 +12,8 @@
     "speakers": "Speakers",
     "menu": "Menu",
     "openMenu": "Open menu",
-    "closeMenu": "Close menu"
+    "closeMenu": "Close menu",
+    "agents": "Agents"
   },
   "masthead": {
     "globalNavigation": "Global navigation",

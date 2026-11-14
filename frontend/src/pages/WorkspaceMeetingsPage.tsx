@@ -123,6 +123,7 @@ import {
 import { downloadBlob } from "@/utils/downloadBlob";
 
 import { MeetingClipsPanel } from "@/components/workspace/MeetingClipsPanel";
+import { MeetingNotesPanel } from "@/components/workspace/MeetingNotesPanel";
 import { MeetingCommentsDrawer } from "@/components/workspace/MeetingCommentsDrawer";
 import { MeetingDlpPanel } from "@/components/workspace/MeetingDlpPanel";
 import { MeetingRevisionsModal } from "@/components/workspace/MeetingRevisionsModal";
@@ -896,7 +897,7 @@ function MeetingDetail({
   /** Workspace owner — may delete anyone's comment (issue #6, D4). */
   isOwner: boolean;
 }) {
-  const { t } = useTranslation(["meetings", "common"]);
+  const { t } = useTranslation(["meetings", "common", "notes"]);
   const toast = useToast();
   const detail = useRecording(workspaceId, recordingId, true);
   // Failures of the detail pane's own actions (sensitivity, export, download,
@@ -926,10 +927,14 @@ function MeetingDetail({
   const [searchParams] = useSearchParams();
   const deepLinkAppliedRef = useRef(false);
   // Transcript, clips or sensitive-content review; ?tab= deep-links.
-  const [view, setView] = useState<"transcript" | "clips" | "dlp">(() => {
-    const tab = searchParams.get("tab");
-    return tab === "clips" || tab === "dlp" ? tab : "transcript";
-  });
+  const [view, setView] = useState<"transcript" | "notes" | "clips" | "dlp">(
+    () => {
+      const tab = searchParams.get("tab");
+      return tab === "notes" || tab === "clips" || tab === "dlp"
+        ? tab
+        : "transcript";
+    },
+  );
   const [playbackRate, setPlaybackRate] = useState(1);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -1472,6 +1477,7 @@ function MeetingDetail({
               <TabsTrigger value="transcript">
                 {t("review.transcript")}
               </TabsTrigger>
+              <TabsTrigger value="notes">{t("notes:tab")}</TabsTrigger>
               <TabsTrigger value="clips">{t("clips.viewClips")}</TabsTrigger>
               {can("redact") && (
                 <TabsTrigger value="dlp">{t("dlp.viewDlp")}</TabsTrigger>
@@ -1587,6 +1593,20 @@ function MeetingDetail({
                     </div>
                   </DataState>
                 </div>
+              )}
+            </TabsContent>
+            <TabsContent value="notes" className="transcript-scroll">
+              {view === "notes" && (
+                <MeetingNotesPanel
+                  workspaceId={workspaceId}
+                  recordingId={recordingId}
+                  displayRevisionId={
+                    rec.approved_revision_id ?? rec.latest_revision_id ?? null
+                  }
+                  canCreate={can("create_notes")}
+                  canExport={can("export")}
+                  isAvailable={config.data?.notes_status === "available"}
+                />
               )}
             </TabsContent>
             <TabsContent value="clips" className="transcript-scroll">

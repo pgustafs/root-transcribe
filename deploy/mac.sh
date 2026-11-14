@@ -1,18 +1,22 @@
 #!/bin/sh
 # Root Transcribe on Podman Desktop (Apple silicon). One input: the
-# OpenAI-compatible speech-to-text endpoint.
+# OpenAI-compatible speech-to-text endpoint. A second, optional one: the LLM
+# endpoint that writes meeting notes (summaries, task lists).
 #
 #   ./deploy/mac.sh http://my-stt-host:8002/v1
+#   ./deploy/mac.sh http://my-stt-host:8002/v1 http://my-llm-host:8001/v1
 #
 # Everything else is automatic: the Hugging Face token comes from $HF_TOKEN or
-# the saved `hf auth login`, the model name is asked from the endpoint, and
+# the saved `hf auth login`, the model names are asked from the endpoints, and
 # passwords are generated once into deploy/secrets.local.json.
-# Optional environment: STT_API_KEY, STT_MODEL (skips detection), REBUILD=1.
+# Optional environment: STT_API_KEY, STT_MODEL, LLM_API_KEY, LLM_MODEL (a model
+# name skips detection), REBUILD=1.
 # Stop:  ./deploy/start.sh stop
 set -eu
 
 usage() {
-  echo "Usage: $0 <speech-to-text endpoint, e.g. http://my-stt-host:8002/v1>" >&2
+  echo "Usage: $0 <speech-to-text endpoint> [<LLM endpoint for meeting notes>]" >&2
+  echo "  e.g. $0 http://my-stt-host:8002/v1 http://my-llm-host:8001/v1" >&2
   exit 2
 }
 fail() {
@@ -20,9 +24,14 @@ fail() {
   exit 1
 }
 
-[ "$#" -eq 1 ] || usage
+[ "$#" -eq 1 ] || [ "$#" -eq 2 ] || usage
 case "$1" in
   http://*|https://*) stt_url=$1 ;;
+  *) usage ;;
+esac
+llm_url=${2:-}
+case "$llm_url" in
+  ""|http://*|https://*) ;;
   *) usage ;;
 esac
 
@@ -36,6 +45,14 @@ if [ "$local_stt" = true ]; then
     fail "Nothing answers at $stt_url on this Mac. Start the speech-to-text server
   and wait until it has finished loading the model, then run this again."
 fi
+case "$llm_url" in
+  http://localhost*|http://127.0.0.1*|https://localhost*|https://127.0.0.1*)
+    curl --silent --max-time 5 -o /dev/null "$llm_url" ||
+      fail "Nothing answers at $llm_url on this Mac. Start the LLM server and wait
+  until it has finished loading the model, then run this again."
+    local_stt=true # the same "reachable from containers?" hint applies below
+    ;;
+esac
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_dir"
@@ -71,27 +88,37 @@ fi
 export HF_TOKEN
 
 # 3. Build the application images once (REBUILD=1 after pulling new code).
+images="root-transcribe root-transcribe-frontend root-transcribe-stt"
+build_agent=0
+if [ -n "$llm_url" ]; then
+  # Meeting notes need one more image: the agent runtime (about 2.5 GB).
+  images="$images root-transcribe-agent"
+  build_agent=1
+fi
 images_ready=true
-for image in root-transcribe root-transcribe-frontend root-transcribe-stt; do
+for image in $images; do
   podman image exists "localhost/$image:latest" || images_ready=false
 done
 if [ "${REBUILD:-}" = 1 ] || [ "$images_ready" = false ]; then
   echo "Building the application images. The first build takes several minutes."
   # No NVIDIA GPU in Podman's machine: install the CPU-only PyTorch build.
-  STT_BUILD_ARGS="--build-arg TORCH_BUILD=cpu" ./deploy/start.sh build
+  STT_BUILD_ARGS="--build-arg TORCH_BUILD=cpu" BUILD_AGENT=$build_agent ./deploy/start.sh build
 fi
 
 # 4. Generate the manifest inside the backend image, so the Mac needs no Python
 #    and the endpoint is checked from where the workers will call it.
+set -- --stt-url "$stt_url" --arch arm64
+[ -z "$llm_url" ] || set -- "$@" --llm-url "$llm_url"
 podman run --rm --user 0 --security-opt label=disable --entrypoint python3 \
   -e HF_TOKEN -e STT_API_KEY="${STT_API_KEY:-}" -e STT_MODEL="${STT_MODEL:-}" \
+  -e LLM_API_KEY="${LLM_API_KEY:-}" -e LLM_MODEL="${LLM_MODEL:-}" \
   -v "$repo_dir/deploy:/deploy" localhost/root-transcribe:latest \
-  /deploy/configure.py --stt-url "$stt_url" --arch arm64 ||
+  /deploy/configure.py "$@" ||
   {
     if [ "$local_stt" = true ]; then
       printf '%s\n' "" \
         "If the error above says the endpoint cannot be reached: it answers on this" \
-        "Mac but not from the containers. Start the speech-to-text server with" \
+        "Mac but not from the containers. Start that server with" \
         "--host 0.0.0.0 instead of 127.0.0.1 and run this again. If that is not" \
         "enough, pass the Mac's network address instead of" \
         "localhost:  $0 http://\$(ipconfig getifaddr en0):<port>/v1" >&2

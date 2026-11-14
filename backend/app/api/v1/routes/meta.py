@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from app.core.config import settings
 from app.schemas.config import AppConfig
-from app.services.dependency_health import meetings_availability
+from app.services.dependency_health import meetings_availability, notes_availability
 
 router = APIRouter(tags=["meta"])
 
@@ -20,6 +20,7 @@ async def get_config() -> AppConfig:
         and bool(settings.AUDIO_S3_ENDPOINT_URL),
         meetings_status=await meetings_availability(),
         meeting_consent_required=settings.MEETING_REQUIRE_CONSENT,
+        notes_status=notes_availability(),
         audio_max_bytes=settings.AUDIO_MAX_BYTES,
         recording_max_minutes=settings.MEETING_MAX_DURATION_MINUTES,
     )

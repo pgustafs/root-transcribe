@@ -2590,3 +2590,106 @@ def expire_upload_sessions() -> dict[str, int]:
 
 
 # --- #22: provider-response ledger sweep + reconciliation --------------------
+
+
+@celery_app.task(
+    name="tasks.generate_meeting_note",
+    # A long meeting is several model runs (parts + merge), each bounded by
+    # NOTES_TIMEOUT_SECONDS in the agent runner.
+    soft_time_limit=3 * 3600,
+    time_limit=3 * 3600 + 300,
+)
+def generate_meeting_note(note_id: str) -> dict[str, str]:
+    """Have a note agent write a document from a recording's transcript.
+
+    Runs on the default queue: the work happens in the agent-runner container
+    (CUGA + the LLM); this task only reads the transcript and stores the result.
+    """
+    from app.crud import meeting_note as meeting_note_crud
+    from app.models.meeting_note import MeetingNote
+    from app.models.meeting_recording import MeetingRecording
+    from app.models.meeting_transcript_segment import MeetingTranscriptSegment
+    from app.models.speaker_profile import SpeakerProfile
+    from app.services import agent_runner, meeting_notes
+    from app.services.transcript_export import ExportSegment
+
+    nid = uuid.UUID(note_id)
+    started = time.monotonic()
+    with session_scope() as session:
+        if not meeting_note_crud.claim_processing_sync(session, note_id=nid):
+            logger.info("generate_meeting_note: note %s not pending", note_id)
+            return {"status": "skipped", "reason": "not_pending"}
+        note = session.get(MeetingNote, nid)
+        assert note is not None  # the CAS above just matched this row
+        try:
+            recording = session.get(MeetingRecording, note.recording_id)
+            if recording is None or note.revision_id is None:
+                raise agent_runner.AgentRunError(
+                    "The transcript is no longer available."
+                )
+            segments = (
+                session.execute(
+                    select(MeetingTranscriptSegment)
+                    .where(MeetingTranscriptSegment.revision_id == note.revision_id)
+                    .order_by(MeetingTranscriptSegment.idx)
+                )
+                .scalars()
+                .all()
+            )
+            if not segments:
+                raise agent_runner.AgentRunError("The transcript is empty.")
+            profile_ids = {
+                s.speaker_profile_id for s in segments if s.speaker_profile_id
+            }
+            names = (
+                dict(
+                    session.execute(
+                        select(SpeakerProfile.id, SpeakerProfile.display_name).where(
+                            SpeakerProfile.id.in_(profile_ids)
+                        )
+                    ).all()
+                )
+                if profile_ids
+                else {}
+            )
+            lines = meeting_notes.transcript_lines(
+                [
+                    ExportSegment(
+                        start_ms=s.start_ms,
+                        end_ms=s.end_ms,
+                        speaker=names.get(s.speaker_profile_id, s.speaker_label),
+                        text=s.text,
+                    )
+                    for s in segments
+                ]
+            )
+            instructions, title = note.instructions, recording.title
+            answer = meeting_notes.write_note(
+                agent_runner.get_agent_runner(),
+                instructions=instructions,
+                title=title,
+                lines=lines,
+                max_chars=settings.NOTES_MAX_INPUT_CHARS,
+                on_step=lambda step: meeting_note_crud.set_step_sync(
+                    session, note_id=nid, step=step
+                ),
+            )
+            meeting_note_crud.complete_sync(
+                session,
+                note_id=nid,
+                markdown=answer.text,
+                model=answer.model,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            return {"status": "ready", "chars": str(len(answer.text))}
+        except agent_runner.AgentRunError as exc:
+            # An expected, explainable failure: show it on the note; no retry.
+            logger.warning("generate_meeting_note: note %s failed: %s", note_id, exc)
+            meeting_note_crud.fail_sync(session, note_id=nid, error=str(exc))
+            return {"status": "failed"}
+        except Exception as exc:
+            logger.exception("generate_meeting_note: note %s failed", note_id)
+            meeting_note_crud.fail_sync(
+                session, note_id=nid, error=f"{type(exc).__name__}: {exc}"
+            )
+            raise

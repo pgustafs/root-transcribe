@@ -24,6 +24,10 @@ DEFAULTS = {
     "STT_BASE_URL": "http://host.containers.internal:8002/v1",
     "STT_MODEL": "whisper-large-v3-turbo",
     "STT_API_KEY": "",
+    # Optional second model for meeting notes; empty = the feature is off.
+    "LLM_BASE_URL": "",
+    "LLM_MODEL": "",
+    "LLM_API_KEY": "",
     "AUDIO_S3_BUCKET": "meeting-audio",
     "AUDIO_S3_REGION": "us-east-1",
     "HF_TOKEN": "",
@@ -59,6 +63,18 @@ ARM64_REPLACEMENTS = (
 )
 
 
+AGENT_BEGIN = "  # agent-runner:begin"
+AGENT_END = "  # agent-runner:end\n"
+
+
+def without_agent_runner(manifest: str) -> str:
+    """Drop the agent-runner container: no LLM, nothing for it to do."""
+    if manifest.count(AGENT_BEGIN) != 1 or manifest.count(AGENT_END) != 1:
+        raise ValueError("Cannot find the agent-runner block in the manifest")
+    start = manifest.index(AGENT_BEGIN)
+    return manifest[:start] + manifest[manifest.index(AGENT_END) + len(AGENT_END) :]
+
+
 def for_arm64(manifest: str) -> str:
     """Swap the amd64-only database and queue images for multi-arch ones."""
     for old, new in ARM64_REPLACEMENTS:
@@ -70,11 +86,11 @@ def for_arm64(manifest: str) -> str:
     return manifest
 
 
-def normalize_stt_url(url: str) -> str:
+def normalize_stt_url(url: str, what: str = "speech-to-text") -> str:
     """Trim the URL and point a loopback host at the container host."""
     parsed = urlsplit(url.strip())
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ValueError("The speech-to-text endpoint must be an HTTP(S) URL")
+        raise ValueError(f"The {what} endpoint must be an HTTP(S) URL")
     if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
         port = f":{parsed.port}" if parsed.port else ""
         parsed = parsed._replace(netloc=CONTAINER_HOST + port)
@@ -94,8 +110,17 @@ def list_stt_models(url: str, api_key: str = "", timeout: float = 10) -> list[st
     return [e["id"] for e in entries if isinstance(e, dict) and e.get("id")]
 
 
-def detect_stt_model(url: str, api_key: str = "") -> tuple[str, str]:
-    """Return (base URL, model) by asking the server which models it serves."""
+def detect_stt_model(url: str, api_key: str = "", *, llm: bool = False) -> tuple[str, str]:
+    """Return (base URL, model) by asking the server which models it serves.
+
+    For speech-to-text a single Whisper model is preferred; for the LLM
+    (``llm=True``) Whisper models are ignored instead.
+    """
+    what, key_name, model_name = (
+        ("LLM", "LLM_API_KEY", "LLM_MODEL")
+        if llm
+        else ("speech-to-text", "STT_API_KEY", "STT_MODEL")
+    )
     candidates = [url] if url.endswith("/v1") else [url, url + "/v1"]
     failure = ""
     for base in candidates:
@@ -104,25 +129,28 @@ def detect_stt_model(url: str, api_key: str = "") -> tuple[str, str]:
         except HTTPError as exc:
             if exc.code in (401, 403):
                 raise ValueError(
-                    f"{base} rejected the request ({exc.code}); export STT_API_KEY and retry"
+                    f"{base} rejected the request ({exc.code}); export {key_name} and retry"
                 ) from exc
             failure = f"{base}/models answered HTTP {exc.code}"
             continue
         except (URLError, OSError, json.JSONDecodeError) as exc:
             reason = getattr(exc, "reason", exc)
             raise ValueError(
-                f"Cannot reach the speech-to-text endpoint {base} from a container: {reason}"
+                f"Cannot reach the {what} endpoint {base} from a container: {reason}"
             ) from exc
         whisper = [m for m in models if "whisper" in m.lower()]
-        choice = whisper if len(whisper) == 1 else models
+        if llm:
+            choice = [m for m in models if m not in whisper]
+        else:
+            choice = whisper if len(whisper) == 1 else models
         if len(choice) == 1:
             return base, choice[0]
         listed = ", ".join(models) or "none"
         raise ValueError(
-            f"Cannot choose a model at {base} (served: {listed}); export STT_MODEL=<name> and retry"
+            f"Cannot choose a model at {base} (served: {listed}); export {model_name}=<name> and retry"
         )
     raise ValueError(
-        f"{failure}. Check the endpoint, or export STT_MODEL=<name> to skip detection"
+        f"{failure}. Check the endpoint, or export {model_name}=<name> to skip detection"
     )
 
 
@@ -180,7 +208,15 @@ def read_settings(
         or re.fullmatch(r"\d+\.\d+\.\d+\.\d+", bucket)
     ):
         raise ValueError("AUDIO_S3_BUCKET must be a valid S3 bucket name")
-    for key in ("APP_URL", "KEYCLOAK_URL", "STT_BASE_URL"):
+    if values["LLM_BASE_URL"] and not values["LLM_MODEL"]:
+        raise ValueError(
+            "Set LLM_MODEL in the environment"
+            if overrides is not None and "LLM_BASE_URL" in overrides
+            else f"Set LLM_MODEL in {path.name} (LLM_BASE_URL is set)"
+        )
+    for key in ("APP_URL", "KEYCLOAK_URL", "STT_BASE_URL", "LLM_BASE_URL"):
+        if key == "LLM_BASE_URL" and not values[key]:
+            continue  # optional: meeting notes stay off
         parsed = urlsplit(values[key])
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
             raise ValueError(f"{key} must be an HTTP(S) URL")
@@ -270,6 +306,8 @@ def render(
             for key in (
                 "STT_BASE_URL",
                 "STT_MODEL",
+                "LLM_BASE_URL",
+                "LLM_MODEL",
                 "AUDIO_S3_BUCKET",
                 "AUDIO_S3_REGION",
             )
@@ -284,11 +322,14 @@ def render(
             key: values[key]
             for key in (
                 "STT_API_KEY",
+                "LLM_API_KEY",
                 "HF_TOKEN",
             )
         },
     }
     manifest = (DEPLOY / "root-transcribe.yaml").read_text()
+    if not values["LLM_BASE_URL"]:
+        manifest = without_agent_runner(manifest)
     realm = json.loads((DEPLOY / "keycloak/root-transcribe-realm.json").read_text())
     client = realm["clients"][0]
     client["redirectUris"] = [values["APP_URL"] + "/*"]
@@ -326,6 +367,11 @@ def main() -> int:
         help="Speech-to-text endpoint as the only input: the settings file becomes optional, "
         "HF_TOKEN (and optional STT_API_KEY, STT_MODEL) come from the environment, "
         "and the model is detected from the server",
+    )
+    parser.add_argument(
+        "--llm-url",
+        help="LLM endpoint for meeting notes (OpenAI-compatible). Optional LLM_API_KEY "
+        "and LLM_MODEL come from the environment; the model is detected from the server",
     )
     parser.add_argument(
         "--arch",
@@ -371,6 +417,19 @@ def main() -> int:
                 "STT_API_KEY": api_key,
                 "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
                 **({"STT_MODEL": model} if model else {}),
+            }
+        if args.llm_url:
+            llm_url = normalize_stt_url(args.llm_url, "LLM")
+            llm_key = os.environ.get("LLM_API_KEY", "")
+            llm_model = os.environ.get("LLM_MODEL", "")
+            if not llm_model and not args.check:
+                llm_url, llm_model = detect_stt_model(llm_url, llm_key, llm=True)
+                print(f"Meeting notes: {llm_url} (model {llm_model})")
+            overrides = {
+                **(overrides or {}),
+                "LLM_BASE_URL": llm_url,
+                "LLM_API_KEY": llm_key,
+                **({"LLM_MODEL": llm_model} if llm_model else {}),
             }
         values = read_settings(
             args.env, allow_empty_hf_token=args.prepare, overrides=overrides

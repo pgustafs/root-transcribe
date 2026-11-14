@@ -2,6 +2,8 @@
 
 Root Transcribe records or accepts audio, separates speakers, transcribes speech,
 and provides a workspace for reviewing, correcting and exporting the result.
+Optionally, agents write notes (summaries, task lists) from the transcript using
+a second, text model.
 This document describes the implemented system. See [README.md](README.md) for
 installation and operations, [backend/README.md](backend/README.md) and
 [frontend/README.md](frontend/README.md) for development, and
@@ -10,7 +12,8 @@ installation and operations, [backend/README.md](backend/README.md) and
 ## Components and deployment boundaries
 
 The local deployment uses one Podman pod, `root-transcribe`, plus an independently
-managed speech-to-text server. Containers in the pod share a network namespace
+managed speech-to-text server and, for meeting notes, an optional independently
+managed LLM server. Containers in the pod share a network namespace
 and reach each other through loopback addresses. The YAML is designed for
 `podman kube play`; it is not a production Kubernetes deployment package.
 
@@ -28,8 +31,10 @@ flowchart LR
         STT["Transcription Celery worker"]
         Beat["Celery beat scheduler"]
         S3[("SeaweedFS: S3 audio")]
+        Agent["Agent runner: CUGA SDK (optional)"]
     end
     ASR["External ASR server: vLLM example"]
+    LLM["External LLM server (optional)"]
     Browser -->|"HTTP / HTTPS"| Web
     Browser -->|"OIDC with PKCE"| KC
     Web -->|"/api and /health"| API
@@ -47,13 +52,17 @@ flowchart LR
     STT --> DB
     STT --> S3
     STT -->|"OpenAI-compatible audio transcription"| ASR
+    Main -->|"Instructions and transcript, loopback HTTP"| Agent
+    Agent -->|"OpenAI-compatible chat completions"| LLM
 ```
 
 | Component | Responsibility | Runtime/image |
 | --- | --- | --- |
 | Frontend | Capture, upload recovery, playback, transcript review, speaker directory, account and job screens | React 19, TypeScript, shadcn/ui; `root-transcribe-frontend` image |
 | API | Authentication, authorization, validation, storage coordination, review and export routes | FastAPI; `root-transcribe` image |
-| General worker | Outbox delivery, reconciliation, cleanup, privacy scans and data exports | Celery on `celery`; same image as API |
+| General worker | Outbox delivery, reconciliation, cleanup, privacy scans, data exports and meeting-note runs | Celery on `celery`; same image as API |
+| Agent runner (optional) | Run one CUGA agent over a transcript and return Markdown; holds only the LLM settings | FastAPI + `cuga` SDK; `root-transcribe-agent` image, present only when `LLM_BASE_URL` is set |
+| LLM server (optional) | Text model that writes the notes | External OpenAI-compatible service; not started by the app |
 | Transcription worker | Audio decoding, diarization, STT calls, speaker embeddings, clips and audio redaction | Celery on `transcription`; `root-transcribe-stt` image with the `stt` Python extra |
 | Scheduler | Enqueue periodic maintenance; run one instance per deployment | Celery beat; same image as API |
 | ASR server | Recognize speech and return text/timestamps | External OpenAI-compatible service; optional `root-transcribe-vllm` container |
@@ -61,7 +70,7 @@ flowchart LR
 | Redis | Celery broker/result backend and shared request-rate counters | Redis 7 |
 | SeaweedFS | Original audio, retained enrollment samples, clips, redacted audio and export objects | Bundled `mini` service, version 4.52 |
 
-The API image has no local speech model. The STT worker loads pyannote models
+The API image has no local speech or language model. The STT worker loads pyannote models
 lazily and uses CUDA when visible, otherwise CPU. **The supplied app manifest does
 not assign a GPU to that worker**, so it runs diarization/embeddings on CPU by
 default. The separate vLLM example explicitly requests the NVIDIA GPU through CDI.
@@ -69,6 +78,39 @@ default. The separate vLLM example explicitly requests the NVIDIA GPU through CD
 Source: [manifest](deploy/root-transcribe.yaml), [entrypoint](deploy/entrypoint.sh),
 [Celery configuration](backend/app/worker/celery_app.py),
 [audio/model services](backend/app/services/diarization.py).
+
+### Meeting notes (optional)
+
+When `LLM_BASE_URL` is set, the pod has one more container, `agent-runner`: a small
+FastAPI service around the CUGA agent SDK (`agent-runner/main.py`). It listens on
+the pod's loopback (port 8011, not published) and receives only the LLM settings,
+so model-written code never runs next to database, storage or identity
+credentials.
+
+Flow: `POST …/recordings/{id}/notes` stores a pending `meeting_note` (with a
+snapshot of the agent's instructions) and an outbox row; the general `worker`
+runs `tasks.generate_meeting_note`, which renders the displayed transcript
+revision as `[H:MM:SS] Speaker: text` lines, calls the runner (once, or part by
+part plus a merge for long meetings, see `services/meeting_notes.py`) and stores
+the Markdown. The UI polls the note list. Agents live in `note_agent` (shared when
+`owner_id` is NULL, otherwise personal); exports are rendered by
+`services/note_export.py`.
+
+The runner builds a fresh agent per run, because an agent's instructions are
+fixed when it is constructed. It runs one request at a time, has no tools
+(transcript in, document out), and returns failures as data so the note shows a
+readable reason. A fixed set of output rules (Markdown only, the meeting's
+language, nothing invented) is appended to every agent's instructions at run
+time and is not editable. Editing a note bumps its `version`; a save based on an
+older version is refused with 409. The text the agent wrote is kept beside the
+edited text so it can be restored.
+
+Source: [runner](agent-runner/main.py), [runner image](deploy/agent.Containerfile),
+[routes](backend/app/api/v1/routes/notes.py),
+[note writing](backend/app/services/meeting_notes.py),
+[built-in agents](backend/app/services/note_defaults.py),
+[export](backend/app/services/note_export.py),
+[models](backend/app/models/meeting_note.py).
 
 ## Recording and transcription flow
 
@@ -219,10 +261,17 @@ in its own PostgreSQL volume.
 
 Workspace roles are owner, manager, editor and viewer. Audio-specific capabilities
 separately govern listening, downloading, editing, export, approval, redaction,
-retention and other operations. Overrides can target roles or individual users;
+retention, creating notes and other operations. Overrides can target roles or individual users;
 user overrides are applied after role overrides. Global administrators receive
 the full base capability set. Backend checks, including sensitivity restrictions,
 remain authoritative even when the UI hides unavailable actions.
+
+Meeting notes follow the same model. Reading notes needs `view_transcript`;
+creating, editing, restoring and deleting them needs `create_notes` (editors and
+up); exporting needs `export`. Creating a note sends the transcript to the LLM,
+so a restricted recording needs the same explicit user grant as an export.
+Shared note agents are changed by administrators and power users only; a
+personal agent is visible to its owner alone, administrators included.
 
 Speaker profiles can exist without voiceprints. Enrolling a voice sample and
 matching it to recordings require applicable speaker-identification consent.
@@ -262,12 +311,15 @@ Source: [API identity dependencies](backend/app/api/deps.py),
 
 The schema groups records into accounts/workspaces/membership, recordings/upload
 sessions, transcription attempts/outbox/jobs, revisions/segments/edit events,
-speakers/voiceprints/consent/suggestions, and comments/clips/privacy/audit records.
+speakers/voiceprints/consent/suggestions, comments/clips/privacy/audit records,
+and note agents/meeting notes.
 Audio bytes live in S3; database rows hold opaque keys and lifecycle metadata.
 Browser IndexedDB contains local recovery copies, independently of server storage.
 
 Alembic migrations are explicit and ordered. `0001_transcription` initializes
-an empty application database; `0002_recording_language` upgrades it. Run
+an empty application database; `0002_recording_language` and
+`0003_meeting_notes` upgrade it (the latter also inserts the built-in note
+agents). Run
 `alembic upgrade head` for both new installations and upgrades. Do not edit an
 applied migration or change version markers to bypass an upgrade. Schema parity
 and upgrade/downgrade checks are in
@@ -304,12 +356,15 @@ A separately managed S3 store must already provide it.
 | Keycloak | 8185 | `127.0.0.1:8185` |
 | PostgreSQL / Redis / S3 | 5432 / 6379 / 8333 | Internal only |
 | General / transcription worker metrics | 9465 / 9466 | Internal only |
+| Agent runner (optional) | 8011, bound to loopback | Internal only |
 | Separate vLLM | 8000 in its own container | Host port 8002, all interfaces in the serving example |
 
 The frontend proxies `/api/` and `/health` to the API. API `/health/ready` checks the
 application database. Public `/api/v1/config` reports transcription availability
 from configuration and a cached queue-consumer check; it does not probe live ASR
-inference or prove model access. The STT worker probe checks Celery responsiveness.
+inference or prove model access. Its `notes_status` only says whether an LLM is
+configured; it does not probe the runner or the model, so a failed run shows its
+reason on the note. The STT worker probe checks Celery responsiveness.
 Models load on first use, so an apparently healthy deployment still needs a real
 audio test.
 
@@ -323,7 +378,10 @@ parts, a 24-hour upload-session lifetime, a 3,600-second ASR request timeout and
 and 35-minute hard limits, but **transcription overrides them**: its soft limit
 is `STT_TIMEOUT_SECONDS` (60 minutes) and its hard limit adds 300 seconds
 (65 minutes). Clips, redaction, DLP scans and compliance exports have their own
-shorter task limits. Size task deadlines, request timeouts and stale-heartbeat
+shorter task limits. A meeting note allows `NOTES_TIMEOUT_SECONDS` (15 minutes)
+per model run and three hours for the whole task, since a long meeting is several
+runs; transcripts longer than `NOTES_MAX_INPUT_CHARS` (48,000 characters) are
+split. Size task deadlines, request timeouts and stale-heartbeat
 thresholds together for the actual models and recording durations.
 
 Beat dispatches outbox work every 30 seconds and reconciles transcription attempts

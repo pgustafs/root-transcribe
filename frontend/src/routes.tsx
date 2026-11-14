@@ -26,6 +26,9 @@ const UsersPage = lazy(() =>
 const JobsPage = lazy(() =>
   import("@/pages/JobsPage").then((m) => ({ default: m.JobsPage })),
 );
+const AgentsPage = lazy(() =>
+  import("@/pages/AgentsPage").then((m) => ({ default: m.AgentsPage })),
+);
 const ProfilePage = lazy(() =>
   import("@/pages/ProfilePage").then((m) => ({ default: m.ProfilePage })),
 );
@@ -72,6 +75,7 @@ export function AppRoutes() {
               </AdminRoute>
             }
           />
+          <Route path="/agents" element={<AgentsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/forbidden" element={<ForbiddenPage />} />
           <Route path="*" element={<NotFoundPage />} />

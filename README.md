@@ -22,6 +22,9 @@ results as documents or subtitles.
   Markdown, text, SRT, VTT, DOCX and PDF.
 - Transcript comments, audio clips, sensitive-data review and redaction, consent,
   audio retention, legal holds, speaker erasure and data-subject exports.
+- Meeting notes written by agents from the transcript (summary, task list and your
+  own), editable in the app and exportable as Markdown, Word and PDF. Optional:
+  needs a second, text model. See [Meeting notes](#meeting-notes-written-by-agents).
 - Keycloak sign-in, local account suspension, notifications and worker job status.
 - English and Swedish interfaces, light/dark themes, structured logs and metrics.
 - Auto / English / Swedish recording language, preserved through recovery and retries.
@@ -47,6 +50,11 @@ For the default diarization model, sign in and accept the conditions on
 Creating a token or downloading Whisper does not grant access to this gated model.
 The token must have read access to it; a fine-grained token must include the
 required repository access.
+
+**Meeting notes are optional and need a second model**: an OpenAI-compatible
+LLM server (for example another vLLM instance) reachable from the containers,
+with a context window of 32,000 tokens or more. Without one the app runs as a
+transcription tool. See [Meeting notes](#meeting-notes-written-by-agents).
 
 Speech-to-text is remote. The application does not start a Whisper server.
 Diarization and speaker embeddings run in the dedicated transcription worker.
@@ -336,6 +344,13 @@ the address of an OpenAI-compatible speech-to-text server.
 
 ```sh
 ./deploy/mac.sh http://my-stt-host:8002/v1
+```
+
+To also get [meeting notes](#meeting-notes-written-by-agents), add the address of
+an OpenAI-compatible LLM server as a second input:
+
+```sh
+./deploy/mac.sh http://my-stt-host:8002/v1 http://my-llm-host:8001/v1
 ```
 
 Before the first run:
@@ -651,6 +666,66 @@ Deployment structure follows [Podman's kube-play documentation](https://docs.pod
 ConfigMaps for configuration/import files, Secrets for credentials, and named
 persistent volumes for data.
 
+## Meeting notes written by agents
+
+With a second model configured, a finished recording gets a **Notes** tab. An
+agent reads the transcript (with speaker names and times) and writes a document:
+the built-in agents are **Summary** and **Task list**. Each note can be edited
+in the app (Markdown, with preview), restored to what the agent wrote, copied,
+and exported as Markdown, Word or PDF. Long meetings are processed in parts and
+merged.
+
+**Agents** are sets of instructions, managed on the Agents page:
+
+- *Shared* agents are available to everyone; administrators and power users add
+  them and change their instructions. The built-in ones can be edited, switched
+  off and reset to their default, but not deleted.
+- *My agents* are personal: any user can add their own, and only they see and
+  run them. A note is visible to everyone who can read the transcript, whichever
+  agent wrote it.
+
+A change to an agent applies the next time it runs; notes already written keep
+their text.
+
+**Setup.** The agents run on the [CUGA](https://github.com/cuga-project/cuga-agent)
+agent SDK in a separate `agent-runner` container, which talks to an
+OpenAI-compatible LLM endpoint. On a Mac pass the endpoint as the second
+argument to `mac.sh` (above). On Linux set it in `deploy/settings.env`:
+
+```dotenv
+LLM_BASE_URL=http://host.containers.internal:8001/v1
+LLM_MODEL=<the server's model name>
+LLM_API_KEY=
+```
+
+then run `./deploy/start.sh build` and `start`. Without `LLM_BASE_URL` the app
+runs as before: the agent image is not built, the container is not started and
+existing notes stay readable.
+
+| Generated resource | Setting | Used by |
+| --- | --- | --- |
+| ConfigMap `transcribe-app-config` | `LLM_BASE_URL`, `LLM_MODEL` | API (feature on/off) and `agent-runner` |
+| Secret `transcribe-app-secret` | `LLM_API_KEY` | `agent-runner` only |
+
+The model name is detected from the server when you pass the address to
+`mac.sh`; set `LLM_MODEL` in the environment if the server offers several.
+A `localhost` address is rewritten so the containers reach the host. For local
+development outside Podman, set `LLM_BASE_URL` and `LLM_MODEL` in `backend/.env`
+and start the runner as described in [agent-runner/README.md](agent-runner/README.md).
+
+Things to know:
+
+- The transcript text is sent to the LLM endpoint. With a model you serve
+  yourself nothing leaves your machines; with a hosted endpoint it does.
+  Recordings marked *restricted* need the same explicit grant as an export.
+- The agent image is about 2.5 GB and the container uses about 0.6 GB of memory.
+- CUGA adds a prompt of roughly 4,500 tokens to every run, and a transcript is
+  sent in parts of at most `NOTES_MAX_INPUT_CHARS` characters (default 48,000,
+  about 12,000 tokens). Serve the model with a context window of 32,000 tokens
+  or more, or lower that setting.
+- Quality depends on the model. The feature has been tested end to end with a
+  stand-in model only; try it with yours before relying on it.
+
 ## Measure transcription quality
 
 `eval/ami_eval.py` scores a running installation against a meeting from the
@@ -704,6 +779,10 @@ uv run --no-sync pytest
 uv sync --frozen --extra dev --extra ffmpeg
 REQUIRE_FFMPEG=1 uv run --no-sync pytest tests/unit/test_media_validation_ffmpeg.py
 
+cd ../agent-runner        # only when working on meeting notes (about 2 GB)
+uv sync --frozen
+uv run --no-sync pytest
+
 cd ../frontend
 npm ci
 npm run lint
@@ -713,8 +792,8 @@ npm test -- --maxWorkers=1
 npm run build
 ```
 
-The normal test suite mocks STT, diarization and S3. It does not download models
-or prove live model quality. Use a real recording to verify the configured
+The normal test suite mocks STT, diarization, S3 and the agent runner. It does
+not download models or prove live model quality. Use a real recording to verify the configured
 services together. Browser smoke tests and the visual audit require a running
 stack; see the [frontend guide](frontend/README.md). A documentation-only review
 does not need to start the services.

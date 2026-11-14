@@ -103,6 +103,15 @@ class Settings(BaseSettings):
     STT_MODEL: str = "whisper-large-v3-turbo"
     STT_TIMEOUT_SECONDS: int = 3600
     STT_MAX_UPLOAD_MB: int = 25
+    # Meeting notes: a second, text model reached through the agent-runner
+    # container (CUGA). Empty LLM_BASE_URL = the feature is off.
+    LLM_BASE_URL: str = ""
+    LLM_MODEL: str = ""
+    AGENT_RUNNER_URL: str = "http://localhost:8011"
+    # Longer transcripts are processed in parts and merged (about 4 characters
+    # per token; leave room for the agent's own prompt and the answer).
+    NOTES_MAX_INPUT_CHARS: int = 48000
+    NOTES_TIMEOUT_SECONDS: int = 900
     DIARIZATION_MODEL: str = "pyannote/speaker-diarization-community-1"
     SPEAKER_EMBEDDING_MODEL: str = "pyannote/wespeaker-voxceleb-resnet34-LM"
     SPEAKER_MATCH_THRESHOLD: float = 0.55

@@ -279,5 +279,96 @@ class ConfigurationTests(unittest.TestCase):
         )
 
 
+    def test_agent_runner_is_deployed_only_with_an_llm(self):
+        secrets = configure.load_secrets(self.root / "s.json", self.root / "m.yaml")
+        without = configure.render(configure.read_settings(self.env), secrets)
+        self.assertNotIn("agent-runner", without)
+        self.assertNotIn("root-transcribe-agent", without)
+        self.assertIn("- name: frontend", without)  # the neighbours are intact
+        self.assertIn("- name: stt-worker", without)
+
+        self.env.write_text(
+            self.env.read_text()
+            + "LLM_BASE_URL=http://host.containers.internal:8001/v1/\n"
+            + "LLM_MODEL=qwen3\nLLM_API_KEY=llm$key\n"
+        )
+        with_llm = configure.render(configure.read_settings(self.env), secrets)
+        self.assertIn("  - name: agent-runner\n", with_llm)
+        self.assertIn("image: localhost/root-transcribe-agent:latest", with_llm)
+        config, app_secret = (
+            json.loads(part)
+            for part in with_llm.split("\n", 1)[1].split("\n---\n")[:2]
+        )
+        self.assertEqual(
+            config["data"]["LLM_BASE_URL"], "http://host.containers.internal:8001/v1"
+        )
+        self.assertEqual(config["data"]["LLM_MODEL"], "qwen3")
+        self.assertEqual(app_secret["stringData"]["LLM_API_KEY"], "llm$key")
+        # The runner gets the LLM settings only, never the app's secrets.
+        block = with_llm[
+            with_llm.index(configure.AGENT_BEGIN) : with_llm.index(configure.AGENT_END)
+        ]
+        self.assertNotIn("envFrom", block)
+        self.assertEqual(block.count("- name: LLM_"), 3)
+        # The Mac variant keeps it too.
+        self.assertIn(
+            "- name: agent-runner",
+            configure.render(configure.read_settings(self.env), secrets, arch="arm64"),
+        )
+
+    def test_llm_needs_a_model_name_and_a_valid_url(self):
+        self.env.write_text(self.env.read_text() + "LLM_BASE_URL=http://llm:8001/v1\n")
+        with self.assertRaisesRegex(ValueError, "LLM_MODEL"):
+            configure.read_settings(self.env)
+        self.env.write_text(
+            "HF_TOKEN=test-token\nLLM_BASE_URL=llm:8001\nLLM_MODEL=m\n"
+        )
+        with self.assertRaisesRegex(ValueError, "LLM_BASE_URL must be an HTTP"):
+            configure.read_settings(self.env)
+
+    def test_llm_model_is_detected_ignoring_whisper(self):
+        origin, seen = self.serve_models(["whisper-large-v3", "qwen3-27b"])
+        self.assertEqual(
+            configure.detect_stt_model(origin, "k", llm=True),
+            (origin + "/v1", "qwen3-27b"),
+        )
+        self.assertIn("Bearer k", seen)
+        origin, _ = self.serve_models(["model-a", "model-b"])
+        with self.assertRaisesRegex(ValueError, "model-a, model-b.*LLM_MODEL"):
+            configure.detect_stt_model(origin + "/v1", llm=True)
+        with self.assertRaisesRegex(ValueError, "Cannot reach the LLM endpoint"):
+            configure.detect_stt_model("http://127.0.0.1:9/v1", llm=True)
+
+    def test_second_endpoint_turns_on_meeting_notes(self):
+        stt, _ = self.serve_models(["whisper-large-v3"])
+        llm, _ = self.serve_models(["qwen3-27b"])
+        output = self.root / "mac.yaml"
+        code, message = self.run_main(
+            "--stt-url", stt, "--llm-url", llm.replace("127.0.0.1", "localhost"),
+            "--arch", "arm64",
+            "--output", str(output), "--secrets", str(self.root / "secrets.json"),
+            env={"HF_TOKEN": "hf-test", "LLM_API_KEY": "llm-key"},
+        )  # fmt: skip
+        self.assertEqual(code, 0, message)
+        self.assertIn("Meeting notes:", message)
+        manifest = output.read_text()
+        config, app_secret = (
+            json.loads(part)
+            for part in manifest.split("\n", 1)[1].split("\n---\n")[:2]
+        )
+        self.assertEqual(config["data"]["LLM_BASE_URL"], llm + "/v1")
+        self.assertEqual(config["data"]["LLM_MODEL"], "qwen3-27b")
+        self.assertEqual(config["data"]["STT_MODEL"], "whisper-large-v3")
+        self.assertEqual(app_secret["stringData"]["LLM_API_KEY"], "llm-key")
+        self.assertIn("- name: agent-runner", manifest)
+        # Without it the same command still works and leaves the runner out.
+        code, _ = self.run_main(
+            "--stt-url", stt, "--arch", "arm64",
+            "--output", str(output), "--secrets", str(self.root / "secrets.json"),
+            env={"HF_TOKEN": "hf-test"},
+        )  # fmt: skip
+        self.assertEqual(code, 0)
+        self.assertNotIn("agent-runner", output.read_text())
+
 if __name__ == "__main__":
     unittest.main()

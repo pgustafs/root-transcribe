@@ -6,6 +6,7 @@ from app.api.v1.routes import (
     jobs,
     meetings,
     meta,
+    notes,
     notifications,
     speakers,
     users,
@@ -13,6 +14,15 @@ from app.api.v1.routes import (
 )
 
 api_router = APIRouter()
-for module in (meta, users, workspaces, meetings, speakers, notifications, jobs):
+for module in (
+    meta,
+    users,
+    workspaces,
+    meetings,
+    notes,
+    speakers,
+    notifications,
+    jobs,
+):
     api_router.include_router(module.router)
 api_router.include_router(speakers.rights_router)

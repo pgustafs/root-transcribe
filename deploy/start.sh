@@ -24,6 +24,11 @@ case "$action" in
     # STT_BUILD_ARGS: extra build options, e.g. "--build-arg TORCH_BUILD=cpu" (see mac.sh).
     # shellcheck disable=SC2086
     podman build ${STT_BUILD_ARGS:-} -f deploy/stt.Containerfile -t localhost/root-transcribe-stt:latest .
+    # Meeting notes need the agent image (about 2.5 GB); build it only when an LLM
+    # is configured (mac.sh sets BUILD_AGENT=1 when it is given an LLM address).
+    if [ "${BUILD_AGENT:-}" = 1 ] || grep -Eq '^LLM_BASE_URL=.+' deploy/settings.env 2>/dev/null; then
+      podman build -f deploy/agent.Containerfile -t localhost/root-transcribe-agent:latest .
+    fi
     ;;
   start)
     if [ "$#" -lt 2 ]; then

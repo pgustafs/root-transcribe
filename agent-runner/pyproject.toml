@@ -1,0 +1,30 @@
+[project]
+name = "root-transcribe-agent-runner"
+version = "0.1.0"
+description = "Runs CUGA agents over meeting transcripts for Root Transcribe."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "cuga==0.4.5",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "langchain-openai>=0.2.0",
+    # Listed only so the CPU-only index below applies to them (CUGA pulls them in).
+    "torch",
+    "torchvision",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3.0", "httpx>=0.28.0"]
+
+# The runner never uses a GPU: take PyTorch's CPU-only Linux wheels (no NVIDIA libraries).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv]
+package = false

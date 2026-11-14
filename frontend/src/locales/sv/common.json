@@ -12,7 +12,8 @@
     "speakers": "Talare",
     "menu": "Meny",
     "openMenu": "Öppna menyn",
-    "closeMenu": "Stäng menyn"
+    "closeMenu": "Stäng menyn",
+    "agents": "Agenter"
   },
   "masthead": {
     "globalNavigation": "Global navigering",

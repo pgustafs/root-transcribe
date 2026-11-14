@@ -13,6 +13,8 @@ export type AppConfig = {
   meetings_status: "available" | "degraded" | "unavailable";
   /** Whether recording requires the participant-consent attestation (#6). */
   meeting_consent_required: boolean;
+  /** Whether meeting notes can be created (an LLM is configured). */
+  notes_status: "available" | "unavailable";
   audio_max_bytes: number;
   recording_max_minutes: number;
 };

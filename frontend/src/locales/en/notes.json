@@ -1,0 +1,120 @@
+{
+  "tab": "Notes",
+  "panel": {
+    "create": "Create notes",
+    "manageAgents": "Manage agents",
+    "loadingAgents": "Loading agents",
+    "groups": {
+      "shared": "Shared",
+      "mine": "My agents"
+    },
+    "noAgents": "No agents are switched on. Add or switch on an agent under Manage agents.",
+    "unavailableTitle": "Notes cannot be created right now",
+    "unavailableBody": "No language model is configured for this installation. Existing notes can still be read, edited and exported.",
+    "startFailed": "Could not start the agent",
+    "emptyTitle": "No notes yet",
+    "emptyBody": "Choose an agent above to have it write a summary, a task list or another document from this transcript.",
+    "emptyBodyReadOnly": "Nobody has created notes for this recording.",
+    "noteAria": "Note: {{agent}}",
+    "edited": "Edited",
+    "copy": "Copy",
+    "copied": "Copied to the clipboard",
+    "copyFailed": "Could not copy to the clipboard",
+    "export": "Export",
+    "exportFailed": "Could not export the note",
+    "formats": {
+      "md": "Markdown (.md)",
+      "docx": "Word (.docx)",
+      "pdf": "PDF (.pdf)"
+    },
+    "moreActions": "More actions for {{agent}}",
+    "runAgain": "Run again",
+    "tryAgain": "Try again",
+    "restore": "Restore the generated text",
+    "restored": "The generated text is back",
+    "saved": "Note saved",
+    "saveFailed": "Could not save the note",
+    "deleted": "Note deleted",
+    "deleteFailed": "Could not delete the note",
+    "deleteTitle": "Delete note?",
+    "deleteConsequence": "The document and its edits are removed. The transcript is not affected.",
+    "failed": "The agent could not write this note",
+    "outdated": "The transcript has changed since this note was written. Run the agent again to bring it up to date.",
+    "editorLabel": "Edit note: {{agent}}",
+    "earlier_one": "{{count}} earlier version",
+    "earlier_other": "{{count}} earlier versions",
+    "steps": {
+      "write": "Reading the transcript and writing…",
+      "part": "Long meeting: working on part {{n}} of {{total}}…",
+      "merge": "Combining the parts into one document…"
+    }
+  },
+  "editor": {
+    "modes": "Editor view",
+    "write": "Write",
+    "preview": "Preview",
+    "toolbar": "Formatting",
+    "placeholderText": "text",
+    "emptyPreview": "Nothing to preview yet.",
+    "tools": {
+      "heading": "Heading",
+      "bold": "Bold",
+      "italic": "Italic",
+      "list": "Bullet list",
+      "checklist": "Checklist",
+      "link": "Link"
+    }
+  },
+  "agents": {
+    "title": "Agents",
+    "subtitle": "Agents write notes from a transcript: a summary, a task list, or anything you describe. Each agent is a set of instructions.",
+    "new": "New agent",
+    "newShared": "New shared agent",
+    "sections": {
+      "shared": {
+        "title": "Shared",
+        "hint": "Available to everyone. Administrators and power users can change them.",
+        "emptyTitle": "No shared agents",
+        "emptyBody": "An administrator or power user can add one."
+      },
+      "mine": {
+        "title": "My agents",
+        "hint": "Only you see and run these.",
+        "emptyTitle": "You have no agents of your own",
+        "emptyBody": "Add one with New agent, for example for the way you like your meeting notes."
+      }
+    },
+    "name": "Name",
+    "namePlaceholder": "For example: Decisions",
+    "nameRequired": "Give the agent a name",
+    "description": "Description",
+    "descriptionPlaceholder": "One line on what it produces",
+    "instructions": "Instructions",
+    "instructionsPlaceholder": "Describe the document you want: what to include, which headings, how long, in which language…",
+    "instructionsRequired": "Write the instructions the agent should follow",
+    "instructionsTooLong": "Instructions can be at most {{max}} characters",
+    "instructionsHelp": "The agent reads the whole transcript with speaker names and times, then follows these instructions. It always answers with a Markdown document in the meeting's language unless you say otherwise.",
+    "active": "Active",
+    "activeAria": "{{name}} is available when creating notes",
+    "changed": "Changed",
+    "actionsColumn": "Actions",
+    "rowActions": "Actions for {{name}}",
+    "builtin": "Built-in",
+    "modified": "Changed from default",
+    "view": "View",
+    "reset": "Reset to default",
+    "editTitle": "Edit agent",
+    "newSharedTitle": "New shared agent",
+    "newPersonalTitle": "New agent",
+    "dialogHint": "Changes apply the next time the agent runs. Notes already written keep their text.",
+    "readOnlyHint": "A shared agent. Administrators and power users can change it; you can create your own under My agents.",
+    "saveFailed": "Could not save the agent",
+    "deleteFailed": "Could not delete the agent",
+    "toastCreated": "Agent {{name}} added",
+    "toastSaved": "Agent {{name}} saved",
+    "toastReset": "{{name}} is back to its default",
+    "toastDeleted": "Agent {{name}} deleted",
+    "deleteTitle": "Delete agent?",
+    "deleteConsequence": "Notes it has already written are kept."
+  }
+}

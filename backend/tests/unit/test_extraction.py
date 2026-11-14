@@ -18,11 +18,13 @@ def test_only_transcription_support_routes_are_exposed():
     paths = set(app.openapi()["paths"])
     assert "/api/v1/workspaces/{workspace_id}/recordings" in paths
     assert "/api/v1/speakers" in paths
+    # Meeting notes written by agents are part of this app (added deliberately).
+    assert "/api/v1/workspaces/{workspace_id}/recordings/{recording_id}/notes" in paths
+    assert "/api/v1/note-agents" in paths
     forbidden = (
         "/chat",
         "/rag",
         "/podcasts",
-        "/notes",
         "/recap",
         "/ask",
         "/save-as-source",

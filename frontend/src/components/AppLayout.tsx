@@ -15,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { Link, matchPath, Outlet, useLocation } from "react-router-dom";
 import {
+  BotIcon,
   FolderOpenIcon,
   GlobeIcon,
   ListTodoIcon,
@@ -165,6 +166,7 @@ export function AppLayout() {
 
   const links: NavLink[] = [
     { to: "/workspaces", label: t("nav.workspaces"), icon: FolderOpenIcon },
+    { to: "/agents", label: t("nav.agents"), icon: BotIcon },
     ...(user?.role === "admin" || user?.role === "power_user"
       ? [
           {

@@ -15,6 +15,10 @@ from app.models.meeting_governance import (
     MeetingPermissionGrant,  # noqa: F401
     RetentionPolicy,  # noqa: F401
 )
+from app.models.meeting_note import (
+    MeetingNote,  # noqa: F401
+    NoteAgent,  # noqa: F401
+)
 from app.models.meeting_recording import MeetingRecording  # noqa: F401
 from app.models.meeting_transcript_revision import (
     MeetingTranscriptEditEvent,  # noqa: F401

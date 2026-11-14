@@ -131,3 +131,22 @@ async def meetings_availability() -> str:
     if not settings.STT_BASE_URL.strip():
         return "degraded"
     return "available" if await _transcription_consumer_cached() else "degraded"
+
+
+def notes_configured() -> bool:
+    """Whether an LLM endpoint is configured for meeting notes."""
+    return bool(settings.LLM_BASE_URL.strip())
+
+
+def notes_availability() -> str:
+    """The frontend's signal for meeting notes: available | unavailable."""
+    return "available" if notes_configured() else "unavailable"
+
+
+async def ensure_notes_path() -> None:
+    """Route dependency: refuse to queue a note nobody could write."""
+    if not notes_configured():
+        raise AppError(
+            "Meeting notes are not configured; set LLM_BASE_URL and retry.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )

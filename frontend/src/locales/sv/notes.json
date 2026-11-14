@@ -1,0 +1,120 @@
+{
+  "tab": "Anteckningar",
+  "panel": {
+    "create": "Skapa anteckningar",
+    "manageAgents": "Hantera agenter",
+    "loadingAgents": "Läser in agenter",
+    "groups": {
+      "shared": "Delade",
+      "mine": "Mina agenter"
+    },
+    "noAgents": "Inga agenter är påslagna. Lägg till eller slå på en agent under Hantera agenter.",
+    "unavailableTitle": "Anteckningar kan inte skapas just nu",
+    "unavailableBody": "Ingen språkmodell är konfigurerad för den här installationen. Befintliga anteckningar kan fortfarande läsas, redigeras och exporteras.",
+    "startFailed": "Det gick inte att starta agenten",
+    "emptyTitle": "Inga anteckningar ännu",
+    "emptyBody": "Välj en agent ovan för att låta den skriva en sammanfattning, en uppgiftslista eller ett annat dokument utifrån transkriptet.",
+    "emptyBodyReadOnly": "Ingen har skapat anteckningar för den här inspelningen.",
+    "noteAria": "Anteckning: {{agent}}",
+    "edited": "Redigerad",
+    "copy": "Kopiera",
+    "copied": "Kopierat till urklipp",
+    "copyFailed": "Det gick inte att kopiera till urklipp",
+    "export": "Exportera",
+    "exportFailed": "Det gick inte att exportera anteckningen",
+    "formats": {
+      "md": "Markdown (.md)",
+      "docx": "Word (.docx)",
+      "pdf": "PDF (.pdf)"
+    },
+    "moreActions": "Fler åtgärder för {{agent}}",
+    "runAgain": "Kör igen",
+    "tryAgain": "Försök igen",
+    "restore": "Återställ den genererade texten",
+    "restored": "Den genererade texten är tillbaka",
+    "saved": "Anteckningen sparades",
+    "saveFailed": "Det gick inte att spara anteckningen",
+    "deleted": "Anteckningen togs bort",
+    "deleteFailed": "Det gick inte att ta bort anteckningen",
+    "deleteTitle": "Ta bort anteckningen?",
+    "deleteConsequence": "Dokumentet och dess ändringar tas bort. Transkriptet påverkas inte.",
+    "failed": "Agenten kunde inte skriva den här anteckningen",
+    "outdated": "Transkriptet har ändrats sedan anteckningen skrevs. Kör agenten igen för att uppdatera den.",
+    "editorLabel": "Redigera anteckning: {{agent}}",
+    "earlier_one": "{{count}} tidigare version",
+    "earlier_other": "{{count}} tidigare versioner",
+    "steps": {
+      "write": "Läser transkriptet och skriver…",
+      "part": "Långt möte: arbetar med del {{n}} av {{total}}…",
+      "merge": "Slår ihop delarna till ett dokument…"
+    }
+  },
+  "editor": {
+    "modes": "Redigeringsvy",
+    "write": "Skriv",
+    "preview": "Förhandsgranska",
+    "toolbar": "Formatering",
+    "placeholderText": "text",
+    "emptyPreview": "Inget att förhandsgranska ännu.",
+    "tools": {
+      "heading": "Rubrik",
+      "bold": "Fet",
+      "italic": "Kursiv",
+      "list": "Punktlista",
+      "checklist": "Checklista",
+      "link": "Länk"
+    }
+  },
+  "agents": {
+    "title": "Agenter",
+    "subtitle": "Agenter skriver anteckningar utifrån ett transkript: en sammanfattning, en uppgiftslista eller något annat du beskriver. Varje agent är en uppsättning instruktioner.",
+    "new": "Ny agent",
+    "newShared": "Ny delad agent",
+    "sections": {
+      "shared": {
+        "title": "Delade",
+        "hint": "Tillgängliga för alla. Administratörer och avancerade användare kan ändra dem.",
+        "emptyTitle": "Inga delade agenter",
+        "emptyBody": "En administratör eller avancerad användare kan lägga till en."
+      },
+      "mine": {
+        "title": "Mina agenter",
+        "hint": "Bara du ser och kör dessa.",
+        "emptyTitle": "Du har inga egna agenter",
+        "emptyBody": "Lägg till en med Ny agent, till exempel för hur du vill ha dina mötesanteckningar."
+      }
+    },
+    "name": "Namn",
+    "namePlaceholder": "Till exempel: Beslut",
+    "nameRequired": "Ge agenten ett namn",
+    "description": "Beskrivning",
+    "descriptionPlaceholder": "En rad om vad den tar fram",
+    "instructions": "Instruktioner",
+    "instructionsPlaceholder": "Beskriv dokumentet du vill ha: vad som ska ingå, vilka rubriker, hur långt, på vilket språk…",
+    "instructionsRequired": "Skriv instruktionerna som agenten ska följa",
+    "instructionsTooLong": "Instruktionerna får vara högst {{max}} tecken",
+    "instructionsHelp": "Agenten läser hela transkriptet med talarnamn och tider och följer sedan instruktionerna. Den svarar alltid med ett Markdown-dokument på mötets språk om du inte anger något annat.",
+    "active": "Aktiv",
+    "activeAria": "{{name}} är tillgänglig när anteckningar skapas",
+    "changed": "Ändrad",
+    "actionsColumn": "Åtgärder",
+    "rowActions": "Åtgärder för {{name}}",
+    "builtin": "Inbyggd",
+    "modified": "Ändrad från standard",
+    "view": "Visa",
+    "reset": "Återställ till standard",
+    "editTitle": "Redigera agent",
+    "newSharedTitle": "Ny delad agent",
+    "newPersonalTitle": "Ny agent",
+    "dialogHint": "Ändringar gäller nästa gång agenten körs. Anteckningar som redan skrivits behåller sin text.",
+    "readOnlyHint": "En delad agent. Administratörer och avancerade användare kan ändra den; du kan skapa egna under Mina agenter.",
+    "saveFailed": "Det gick inte att spara agenten",
+    "deleteFailed": "Det gick inte att ta bort agenten",
+    "toastCreated": "Agenten {{name}} lades till",
+    "toastSaved": "Agenten {{name}} sparades",
+    "toastReset": "{{name}} är återställd till standard",
+    "toastDeleted": "Agenten {{name}} togs bort",
+    "deleteTitle": "Ta bort agenten?",
+    "deleteConsequence": "Anteckningar som den redan har skrivit behålls."
+  }
+}
