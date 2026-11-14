@@ -103,3 +103,6 @@ playwright-report/
 
 # Temporary shadcn reference checkout
 /ui/
+
+# Evaluation results (eval/ami_eval.py)
+/eval/results/

@@ -651,6 +651,34 @@ Deployment structure follows [Podman's kube-play documentation](https://docs.pod
 ConfigMaps for configuration/import files, Secrets for credentials, and named
 persistent volumes for data.
 
+## Measure transcription quality
+
+`eval/ami_eval.py` scores a running installation against a meeting from the
+[AMI Meeting Corpus](https://groups.inf.ed.ac.uk/ami/corpus/) (English, four
+speakers, CC BY 4.0). It downloads the audio and the human transcript, uploads
+the audio through the normal API, waits for the result and compares the two. It
+needs only Python 3; nothing is installed.
+
+```bash
+python3 eval/ami_eval.py                                  # ES2002a, first 10 minutes
+python3 eval/ami_eval.py --meeting IS1009b --minutes 0    # a whole meeting
+```
+
+It signs in like the browser does, as `admin@example.com` unless `--username`
+says otherwise. Set `RT_PASSWORD` or type the password when asked; the initial
+password must already have been changed in the browser. `--url` selects another
+installation than `http://localhost:8095`.
+
+| Score | Meaning (lower is better) |
+|---|---|
+| WER | Words wrong, ignoring who said them. Approximate where people talk over each other. |
+| cpWER | Words wrong when each word must also be under the right speaker. |
+| DER | Share of speech time that was missed, invented or given to the wrong speaker. |
+
+Results and the transcript are written to `eval/results/` (not committed). The
+uploaded recording stays in a workspace named "AMI evaluation", so it can be
+inspected in the app. Downloads are cached in `~/.cache/root-transcribe-eval`.
+
 ## Verification
 
 Deployment configuration and storage-startup unit checks, from the repository
