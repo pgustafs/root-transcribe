@@ -662,7 +662,10 @@ needs only Python 3; nothing is installed.
 ```bash
 python3 eval/ami_eval.py                                  # ES2002a, first 10 minutes
 python3 eval/ami_eval.py --meeting IS1009b --minutes 0    # a whole meeting
+python3 eval/ami_eval.py --recording <id>                 # score an earlier upload again
 ```
+
+The recording id is in the result file of the earlier run.
 
 It signs in like the browser does, as `admin@example.com` unless `--username`
 says otherwise. Set `RT_PASSWORD` or type the password when asked; the initial
@@ -673,7 +676,7 @@ installation than `http://localhost:8095`.
 |---|---|
 | WER | Words wrong, ignoring who said them. Approximate where people talk over each other. |
 | cpWER | Words wrong when each word must also be under the right speaker. |
-| DER | Share of speech time that was missed, invented or given to the wrong speaker. |
+| DER | Share of speech time that was missed, invented or given to the wrong speaker. A quarter second around each turn edge is not scored. |
 
 Results and the transcript are written to `eval/results/` (not committed). The
 uploaded recording stays in a workspace named "AMI evaluation", so it can be

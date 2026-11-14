@@ -17,6 +17,7 @@ Scores (lower is better):
          talk over each other, because the word order is then ambiguous)
   cpWER  words wrong when each word must also be under the right speaker
   DER    share of speech time given to the wrong speaker, missed or invented
+         (a quarter second around each turn edge is not scored)
 
 The AMI Meeting Corpus is licensed CC BY 4.0 (https://groups.inf.ed.ac.uk/ami/corpus/).
 """
@@ -131,11 +132,44 @@ def trim_wav(source: Path, target: Path, seconds: float) -> float:
 # -------------------------------------------------------------------- reference
 
 
+# Spellings that mean the same thing; scoring them as errors would measure
+# writing style. Each maps to the words used for comparison.
+SAME = {
+    "ok": "okay", "kay": "okay", "'kay": "okay", "yeah": "yes", "yep": "yes", "yup": "yes",
+    "'cause": "because", "cause": "because", "cuz": "because", "'em": "them",
+    "gonna": "going to", "wanna": "want to", "gotta": "got to", "kinda": "kind of",
+    "sorta": "sort of", "dunno": "do not know", "alright": "all right", "'til": "until", "til": "until",
+}
+_ONES = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+
+
+def number_words(n: int) -> list[str]:
+    """Spell out a whole number the way a person would transcribe it."""
+    if n < 20:
+        return [_ONES[n]]
+    if n < 100:
+        return [_TENS[n // 10]] + ([_ONES[n % 10]] if n % 10 else [])
+    if n < 1000:
+        return [_ONES[n // 100], "hundred"] + (number_words(n % 100) if n % 100 else [])
+    if n < 1_000_000:
+        return number_words(n // 1000) + ["thousand"] + (number_words(n % 1000) if n % 1000 else [])
+    return [str(n)]
+
+
 def normalize(text: str) -> list[str]:
-    """Lower-case words without punctuation or hesitation sounds."""
-    text = text.lower().replace("’", "'")
-    words = re.findall(r"[a-z0-9À-ɏ]+(?:['-][a-z0-9À-ɏ]+)*", text)
-    return [w for w in words if w not in FILLERS]
+    """Comparable words: lower case, no punctuation or hesitation sounds,
+    numbers spelled out, hyphenated words split, common spellings unified."""
+    text = text.lower().replace("’", "'").replace("-", " ")
+    text = re.sub(r"(?<=\d),(?=\d{3})", "", text)  # 1,500 is one number
+    out: list[str] = []
+    for word in re.findall(r"'?[a-z0-9À-ɏ]+(?:'[a-z0-9À-ɏ]+)*", text):
+        if word.isdigit():
+            out += number_words(int(word))
+            continue
+        word = SAME.get(word, word.lstrip("'"))
+        out += [w for w in word.split() if w not in FILLERS]
+    return out
 
 
 def load_reference(annotations: Path, meeting: str, limit: float):
@@ -188,6 +222,54 @@ def edit_distance(ref: list[str], hyp: list[str]) -> int:
     return previous[-1]
 
 
+def align(ref: list[str], hyp: list[str]):
+    """Word alignment: counts and the individual errors.
+
+    Returns ``(substitutions, deletions, insertions)`` as lists of
+    ``(reference word, transcript word)``, ``reference word`` and
+    ``transcript word``.
+    """
+    rows, cols = len(ref), len(hyp)
+    steps = [bytearray(cols + 1) for _ in range(rows + 1)]  # 0 match, 1 sub, 2 del, 3 ins
+    previous = list(range(cols + 1))
+    for j in range(1, cols + 1):
+        steps[0][j] = 3
+    for i in range(1, rows + 1):
+        current = [i]
+        row = steps[i]
+        row[0] = 2
+        r = ref[i - 1]
+        for j in range(1, cols + 1):
+            diagonal = previous[j - 1] + (r != hyp[j - 1])
+            up, left = previous[j] + 1, current[j - 1] + 1
+            best = min(diagonal, up, left)
+            current.append(best)
+            row[j] = (0 if r == hyp[j - 1] else 1) if best == diagonal else 2 if best == up else 3
+        previous = current
+    substitutions, deletions, insertions = [], [], []
+    i, j = rows, cols
+    while i or j:
+        step = steps[i][j]
+        if step < 2:
+            if step:
+                substitutions.append((ref[i - 1], hyp[j - 1]))
+            i, j = i - 1, j - 1
+        elif step == 2:
+            deletions.append(ref[i - 1])
+            i -= 1
+        else:
+            insertions.append(hyp[j - 1])
+            j -= 1
+    return substitutions, deletions, insertions
+
+
+def most_common(items: list, count: int = 12) -> list:
+    tally: dict = {}
+    for item in items:
+        tally[item] = tally.get(item, 0) + 1
+    return sorted(tally.items(), key=lambda pair: -pair[1])[:count]
+
+
 def best_assignment(cost: list[list[float]]) -> tuple[float, list[int]]:
     """Cheapest one-to-one pairing of rows to columns of a square matrix."""
     n = len(cost)
@@ -218,9 +300,22 @@ def cp_wer(ref: dict[str, list[str]], hyp: dict[str, list[str]]) -> tuple[float,
     return errors / max(total, 1), mapping
 
 
-def der(ref: dict[str, list[tuple[float, float]]], hyp: dict[str, list[tuple[float, float]]], duration: float):
-    """Diarization error rate on a 10 ms grid, no forgiveness collar."""
+def der(ref: dict[str, list[tuple[float, float]]], hyp: dict[str, list[tuple[float, float]]], duration: float,
+        collar: float = 0.0):
+    """Diarization error rate on a 10 ms grid.
+
+    ``collar`` seconds on each side of every reference turn boundary are not
+    scored (0.25 is the usual convention): nobody, human or model, places turn
+    edges to the hundredth of a second.
+    """
     frames = int(duration / FRAME) + 1
+    skip = bytearray(frames)
+    if collar > 0:
+        for turns in ref.values():
+            for start, end in turns:
+                for edge in (start, end):
+                    for f in range(max(0, int((edge - collar) / FRAME)), min(frames, int((edge + collar) / FRAME) + 1)):
+                        skip[f] = 1
 
     def grid(turns: dict[str, list[tuple[float, float]]]):
         ids = list(turns)
@@ -236,7 +331,9 @@ def der(ref: dict[str, list[tuple[float, float]]], hyp: dict[str, list[tuple[flo
     n = max(len(ref_ids), len(hyp_ids), 1)
     overlap = [[0.0] * n for _ in range(n)]
     total = missed = false_alarm = matched_slots = 0
-    for r, h in zip(ref_grid, hyp_grid):
+    for f, (r, h) in enumerate(zip(ref_grid, hyp_grid)):
+        if skip[f]:
+            continue
         nr, nh = bin(r).count("1"), bin(h).count("1")
         total += nr
         missed += max(0, nr - nh)
@@ -422,10 +519,14 @@ def run(args: argparse.Namespace) -> int:
         "POST", "/workspaces", {"name": WORKSPACE_NAME, "description": "Recordings uploaded by eval/ami_eval.py"}
     )
     started = time.monotonic()
-    title = f"AMI {label} {time.strftime('%Y-%m-%d %H:%M')}"
-    recording = client.upload(workspace["id"], clip, title, args.language)
+    if args.recording:
+        recording = {"id": args.recording}
+        print(f"Scoring the existing recording {args.recording} (no upload).")
+    else:
+        title = f"AMI {label} {time.strftime('%Y-%m-%d %H:%M')}"
+        recording = client.upload(workspace["id"], clip, title, args.language)
+        print(f"Uploaded as “{title}”. Waiting for the transcript (limit {args.timeout // 60} min)...")
     path = f"/workspaces/{workspace['id']}/recordings/{recording['id']}"
-    print(f"Uploaded as “{title}”. Waiting for the transcript (limit {args.timeout // 60} min)...")
     step = None
     while True:
         detail = client.json("GET", path)
@@ -460,9 +561,12 @@ def run(args: argparse.Namespace) -> int:
     ref_all = [word for _, turn in sorted(ref_turn_words, key=lambda t: t[0]) for word in turn]
     ref_by_speaker = {speaker: [w for _, _, w in sorted(words)] for speaker, words in reference.items()}
 
-    wer = edit_distance(ref_all, hyp_all) / len(ref_all)
+    substitutions, deletions, insertions = align(ref_all, hyp_all)
+    wer = (len(substitutions) + len(deletions) + len(insertions)) / len(ref_all)
     cpwer, mapping = cp_wer(ref_by_speaker, hyp_by_speaker)
-    speaker_time = der({s: to_turns(w) for s, w in reference.items()}, hyp_turns, duration)
+    ref_turns = {s: to_turns(w) for s, w in reference.items()}
+    speaker_time = der(ref_turns, hyp_turns, duration, collar=0.25)
+    strict = der(ref_turns, hyp_turns, duration)
     result = {
         "meeting": meeting,
         "minutes": round(duration / 60, 2),
@@ -472,10 +576,17 @@ def run(args: argparse.Namespace) -> int:
         "reference_words": len(ref_all),
         "transcript_words": len(hyp_all),
         "wer": round(wer, 4),
+        "substituted": len(substitutions),
+        "left_out": len(deletions),
+        "added": len(insertions),
         "cpwer": round(cpwer, 4),
         **{key: round(value, 4) for key, value in speaker_time.items()},
-        "processing_seconds": round(elapsed, 1),
-        "realtime_factor": round(elapsed / duration, 3),
+        "der_without_collar": {key: round(value, 4) for key, value in strict.items()},
+        "processing_seconds": None if args.recording else round(elapsed, 1),
+        "realtime_factor": None if args.recording else round(elapsed / duration, 3),
+        "common_substitutions": [[a, b, n] for (a, b), n in most_common(substitutions)],
+        "common_left_out": most_common(deletions),
+        "common_added": most_common(insertions),
         "speaker_mapping": mapping,
         "recording_id": recording["id"],
     }
@@ -490,14 +601,22 @@ def run(args: argparse.Namespace) -> int:
         "".join(f"{speaker}: {' '.join(words)}\n" for speaker, words in ref_by_speaker.items())
     )
 
+    def words(items: list[str]) -> str:
+        return ", ".join(f"{word} ({n})" for word, n in most_common(items, 8)) or "-"
+
+    timing = "" if args.recording else f"\n  Processing time   {elapsed:.0f}s ({elapsed / duration:.2f}x the audio length)"
     print(f"""
 Result for {meeting} ({duration / 60:.1f} min, language {args.language})
   Speakers          {len(hyp_by_speaker)} detected, {len(reference)} in the reference
   Words             {len(hyp_all)} transcribed, {len(ref_all)} in the reference
-  WER               {wer:6.1%}   words wrong, ignoring speakers
+  WER               {wer:6.1%}   words wrong, ignoring speakers:
+                             {len(substitutions)} replaced, {len(deletions)} left out, {len(insertions)} added
   cpWER             {cpwer:6.1%}   words wrong or under the wrong speaker
   DER               {speaker_time['der']:6.1%}   speech time: missed {speaker_time['missed']:.1%}, invented {speaker_time['false_alarm']:.1%}, wrong speaker {speaker_time['confusion']:.1%}
-  Processing time   {elapsed:.0f}s ({elapsed / duration:.2f}x the audio length)
+                             (0.25 s around turn edges not scored; {strict['der']:.1%} when it is){timing}
+  Most often left out   {words(deletions)}
+  Most often added      {words(insertions)}
+  Most often replaced   {', '.join(f'{a}→{b}' for (a, b), _ in most_common(substitutions, 8)) or '-'}
 Details saved in {out}/. The recording stays in the “{WORKSPACE_NAME}” workspace.""")
     return 0
 
@@ -509,6 +628,7 @@ def main() -> int:
     parser.add_argument("--meeting", default="ES2002a", help="AMI meeting id (default: %(default)s)")
     parser.add_argument("--minutes", type=float, default=10, help="use the first N minutes; 0 = the whole meeting (default: %(default)s)")
     parser.add_argument("--language", default="en", choices=("en", "auto"), help="language sent with the upload (default: %(default)s)")
+    parser.add_argument("--recording", metavar="ID", help="score this already transcribed recording again instead of uploading (the id is in the result file; use the same --meeting and --minutes)")
     parser.add_argument("--timeout", type=int, default=3600, help="seconds to wait for the transcript (default: %(default)s)")
     parser.add_argument("--cache", default="~/.cache/root-transcribe-eval", help="where downloads are kept (default: %(default)s)")
     parser.add_argument("--output", default="eval/results", help="where results are written (default: %(default)s)")
