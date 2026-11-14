@@ -1,0 +1,117 @@
+{
+  "unknown": "okänd",
+  "app": {
+    "fallbackName": "Konsol"
+  },
+  "nav": {
+    "primary": "Primär",
+    "administration": "Administration",
+    "users": "Användare",
+    "workspaces": "Arbetsytor",
+    "jobs": "Bakgrundsjobb",
+    "speakers": "Talare",
+    "menu": "Meny",
+    "openMenu": "Öppna menyn",
+    "closeMenu": "Stäng menyn"
+  },
+  "masthead": {
+    "globalNavigation": "Global navigering",
+    "selectLanguage": "Välj språk",
+    "accountMenu": "Kontomeny — {{account}}",
+    "account": "Konto",
+    "myProfile": "Min profil",
+    "logout": "Logga ut",
+    "skipToContent": "Hoppa till innehållet"
+  },
+  "actions": {
+    "save": "Spara",
+    "cancel": "Avbryt",
+    "delete": "Ta bort",
+    "remove": "Ta bort",
+    "close": "Stäng",
+    "create": "Skapa",
+    "edit": "Redigera",
+    "copy": "Kopiera",
+    "copied": "Kopierat"
+  },
+  "dataState": {
+    "loading": "Läser in",
+    "errorTitle": "Det gick inte att läsa in data",
+    "emptyTitle": "Inget här ännu",
+    "emptyBody": "Det finns inget att visa ännu.",
+    "filteredTitle": "Inga resultat matchar",
+    "filteredBody": "Ändra eller rensa filtren för att se fler resultat.",
+    "clearFilters": "Rensa alla filter",
+    "retry": "Försök igen"
+  },
+  "errorBoundary": {
+    "title": "Något gick fel",
+    "body": "Ett oväntat fel uppstod när sidan skulle visas. Du kan försöka ladda om.",
+    "reload": "Ladda om sidan"
+  },
+  "confirmDelete": {
+    "defaultTitle": "Ta bort objektet?",
+    "body": "<strong>{{name}}</strong> tas bort permanent. Det går inte att ångra."
+  },
+  "notificationsBell": {
+    "toggleAria_one": "Aviseringar ({{count}} oläst)",
+    "toggleAria_other": "Aviseringar ({{count}} olästa)"
+  },
+  "alert": {
+    "custom": "Meddelande:",
+    "info": "Informationsmeddelande:",
+    "success": "Bekräftelsemeddelande:",
+    "warning": "Varningsmeddelande:",
+    "danger": "Felmeddelande:"
+  },
+  "rowActionsAria": "Radåtgärder",
+  "unknownValue": "Okänd",
+  "role": {
+    "admin": "Administratör",
+    "power_user": "Avancerad användare",
+    "feedback_reviewer": "Feedbackgranskare",
+    "user": "Användare"
+  },
+  "status": {
+    "active": "Aktiv",
+    "inactive": "Inaktiv"
+  },
+  "pagination": {
+    "itemsPerPage": "Objekt per sida",
+    "toFirstPage": "Gå till första sidan",
+    "toPreviousPage": "Gå till föregående sida",
+    "toLastPage": "Gå till sista sidan",
+    "toNextPage": "Gå till nästa sida",
+    "label": "Sidnumrering",
+    "of": "av"
+  },
+  "search": {
+    "reset": "Rensa sökning"
+  },
+  "errorPages": {
+    "goToDashboard": "Gå till arbetsytor",
+    "notFound": {
+      "documentTitle": "Sidan hittades inte",
+      "title": "404: Sidan hittades inte",
+      "body": "Sidan finns inte eller har flyttats. Kontrollera adressen eller gå tillbaka till arbetsytorna."
+    },
+    "forbidden": {
+      "documentTitle": "Åtkomst nekad",
+      "title": "403: Åtkomst nekad",
+      "body": "Du har inte behörighet att visa den här sidan. Kontakta en administratör om du behöver åtkomst."
+    }
+  },
+  "dsar": {
+    "emptyTitle": "Inga exporter ännu",
+    "emptyBody": "Begär en export för att samla allt som finns lagrat om en registrerad person.",
+    "requested": "Exporten har begärts",
+    "downloadFailed": "Det gick inte att ladda ned exporten"
+  },
+  "breadcrumb": "Brödsmulor",
+  "theme": {
+    "label": "Tema",
+    "light": "Ljust",
+    "dark": "Mörkt",
+    "system": "System"
+  }
+}

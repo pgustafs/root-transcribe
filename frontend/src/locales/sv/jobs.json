@@ -1,0 +1,87 @@
+{
+  "title": "Bakgrundsjobb",
+  "cards": {
+    "total": "Totalt",
+    "running": "Körs",
+    "failed": "Misslyckade",
+    "loading": "Läser in"
+  },
+  "filters": {
+    "statusAria": "Filtrera efter status",
+    "statusAll": "Alla statusar",
+    "taskAria": "Filtrera efter uppgift",
+    "taskAll": "Alla uppgifter",
+    "searchAria": "Sök jobb",
+    "searchPlaceholder": "Sök på uppgift eller request-id",
+    "limitAria": "Antal jobb att visa",
+    "limitOption": "Senaste {{count}}",
+    "refresh": "Uppdatera"
+  },
+  "status": {
+    "pending": "Väntar",
+    "started": "Körs",
+    "success": "Lyckades",
+    "failure": "Misslyckades",
+    "retry": "Försöker igen",
+    "revoked": "Återkallad"
+  },
+  "col": {
+    "task": "Uppgift",
+    "status": "Status",
+    "triggeredBy": "Utlöst av",
+    "started": "Startad",
+    "duration": "Varaktighet",
+    "taskId": "Uppgifts-ID",
+    "requestId": "Request-ID",
+    "actions": "Åtgärder"
+  },
+  "cancel": {
+    "action": "Avbryt",
+    "bulk": "Avbryt valda ({{count}})",
+    "selectAllAria": "Markera alla jobb som kan avbrytas",
+    "confirmTitle_one": "Avbryt jobb?",
+    "confirmTitle_other": "Avbryt {{count}} jobb?",
+    "confirmBody_one": "Detta stoppar den pågående uppgiften. Redan utfört arbete återställs inte.",
+    "confirmBody_other": "Detta stoppar {{count}} pågående uppgifter. Redan utfört arbete återställs inte.",
+    "confirmAction_one": "Avbryt jobb",
+    "confirmAction_other": "Avbryt {{count}} jobb",
+    "dismiss": "Låt fortsätta",
+    "error": "Kunde inte avbryta jobbet",
+    "actionFor": "Avbryt {{task}}",
+    "toast_one": "Jobbet har avbrutits",
+    "toast_other": "{{count}} jobb har avbrutits",
+    "selectRowAria": "Välj {{name}} ({{id}})"
+  },
+  "copyTaskId": "Kopiera uppgifts-ID {{id}}",
+  "tableAria": "Bakgrundsjobb",
+  "emptyTitle": "Inga jobb ännu",
+  "emptyBody": "Bakgrundsjobb visas här när uppgifter körs.",
+  "loading": "Läser in jobb",
+  "detail": {
+    "title": "Jobbdetaljer",
+    "taskName": "Uppgift",
+    "taskId": "Uppgifts-ID",
+    "requestId": "Request-ID",
+    "triggeredBy": "Utlöst av",
+    "worker": "Worker",
+    "queue": "Kö",
+    "retries": "Försök",
+    "created": "Köad",
+    "started": "Startad",
+    "finished": "Avslutad",
+    "duration": "Varaktighet",
+    "args": "Argument",
+    "result": "Resultat",
+    "error": "Fel",
+    "traceback": "Stackspårning",
+    "errorRegion": "Felmeddelande",
+    "tracebackRegion": "Stackspårning"
+  },
+  "description": "Övervaka bakgrundsuppgifter, granska fel och avbryt uppgifter som fortfarande väntar eller körs.",
+  "copyRequestId": "Kopiera request-ID {{id}}",
+  "duration": {
+    "ms": "{{value}} ms",
+    "s": "{{value}} s",
+    "min": "{{minutes}} min {{seconds}} s"
+  }
+}

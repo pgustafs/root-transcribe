@@ -1,0 +1,87 @@
+{
+  "title": "Background jobs",
+  "cards": {
+    "total": "Total",
+    "running": "Running",
+    "failed": "Failed",
+    "loading": "Loading"
+  },
+  "filters": {
+    "statusAria": "Filter by status",
+    "statusAll": "All statuses",
+    "taskAria": "Filter by task",
+    "taskAll": "All tasks",
+    "searchAria": "Search jobs",
+    "searchPlaceholder": "Search by task or request id",
+    "limitAria": "Number of jobs to show",
+    "limitOption": "Last {{count}}",
+    "refresh": "Refresh"
+  },
+  "status": {
+    "pending": "Pending",
+    "started": "Running",
+    "success": "Success",
+    "failure": "Failed",
+    "retry": "Retrying",
+    "revoked": "Revoked"
+  },
+  "col": {
+    "task": "Task",
+    "status": "Status",
+    "triggeredBy": "Triggered by",
+    "started": "Started",
+    "duration": "Duration",
+    "taskId": "Task ID",
+    "requestId": "Request ID",
+    "actions": "Actions"
+  },
+  "cancel": {
+    "action": "Cancel",
+    "bulk": "Cancel selected ({{count}})",
+    "selectAllAria": "Select all cancellable jobs",
+    "confirmTitle_one": "Cancel job?",
+    "confirmTitle_other": "Cancel {{count}} jobs?",
+    "confirmBody_one": "This stops the running task. Work already done is not rolled back.",
+    "confirmBody_other": "This stops {{count}} running tasks. Work already done is not rolled back.",
+    "confirmAction_one": "Cancel job",
+    "confirmAction_other": "Cancel {{count}} jobs",
+    "dismiss": "Keep running",
+    "error": "Could not cancel the job",
+    "actionFor": "Cancel {{task}}",
+    "toast_one": "Job cancelled",
+    "toast_other": "{{count}} jobs cancelled",
+    "selectRowAria": "Select {{name}} ({{id}})"
+  },
+  "copyTaskId": "Copy task ID {{id}}",
+  "tableAria": "Background jobs",
+  "emptyTitle": "No jobs yet",
+  "emptyBody": "Background jobs appear here as tasks run.",
+  "loading": "Loading jobs",
+  "detail": {
+    "title": "Job details",
+    "taskName": "Task",
+    "taskId": "Task ID",
+    "requestId": "Request ID",
+    "triggeredBy": "Triggered by",
+    "worker": "Worker",
+    "queue": "Queue",
+    "retries": "Retries",
+    "created": "Enqueued",
+    "started": "Started",
+    "finished": "Finished",
+    "duration": "Duration",
+    "args": "Arguments",
+    "result": "Result",
+    "error": "Error",
+    "traceback": "Traceback",
+    "errorRegion": "Error message",
+    "tracebackRegion": "Traceback"
+  },
+  "description": "Monitor background tasks, inspect failures, and cancel tasks that are still queued or running.",
+  "copyRequestId": "Copy request ID {{id}}",
+  "duration": {
+    "ms": "{{value}} ms",
+    "s": "{{value}} s",
+    "min": "{{minutes}} min {{seconds}} s"
+  }
+}

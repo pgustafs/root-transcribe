@@ -1,0 +1,442 @@
+# Root Transcribe — local Podman demo infrastructure.
+# Do not put credentials in this file. Run ./deploy/start.sh init, edit
+# deploy/settings.env, then run ./deploy/start.sh start.
+# configure.py prepends settings, secrets and the realm import as ConfigMaps.
+# All containers share localhost; only UI, API and sign-in ports are published,
+# bound to loopback. STT runs externally; SeaweedFS provides internal S3 storage.
+#
+# Persistent storage (preserved by ./deploy/start.sh stop)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: transcribe-pgdata
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: transcribe-redis-data
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: transcribe-keycloak-pgdata
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: transcribe-stt-hf-cache
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: transcribe-seaweedfs-data
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+# Application pod: identity, data, audio storage, API, jobs, transcription and UI.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: root-transcribe
+  labels:
+    app: root-transcribe
+spec:
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 120
+  containers:
+  # Identity: its database is isolated from application data.
+  - name: keycloak-postgres
+    image: docker.io/library/postgres:16
+    args:
+    - -c
+    - port=5434
+    env:
+    - name: POSTGRES_DB
+      value: keycloak
+    - name: POSTGRES_USER
+      value: keycloak
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: transcribe-keycloak-secret
+          key: KEYCLOAK_DB_PASSWORD
+    volumeMounts:
+    - name: transcribe-keycloak-pgdata
+      mountPath: /var/lib/postgresql/data
+    readinessProbe:
+      exec:
+        command:
+        - pg_isready
+        - -p
+        - '5434'
+        - -U
+        - keycloak
+        - -d
+        - keycloak
+      initialDelaySeconds: 5
+      periodSeconds: 5
+  - name: keycloak
+    image: quay.io/keycloak/keycloak:26.7.3
+    args:
+    - start-dev
+    - --import-realm
+    - --http-port=8185
+    env:
+    - name: KC_DB
+      value: postgres
+    - name: KC_DB_URL
+      value: jdbc:postgresql://localhost:5434/keycloak
+    - name: KC_DB_USERNAME
+      value: keycloak
+    - name: KC_DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: transcribe-keycloak-secret
+          key: KEYCLOAK_DB_PASSWORD
+    - name: KC_HOSTNAME
+      valueFrom:
+        configMapKeyRef:
+          name: transcribe-app-config
+          key: KEYCLOAK_URL
+    - name: KC_BOOTSTRAP_ADMIN_USERNAME
+      value: admin
+    - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: transcribe-keycloak-secret
+          key: KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
+    - name: KC_HEALTH_ENABLED
+      value: 'true'
+    - name: KEYCLOAK_APP_ADMIN_EMAIL
+      valueFrom:
+        configMapKeyRef:
+          name: transcribe-app-config
+          key: KEYCLOAK_APP_ADMIN_EMAIL
+    - name: KEYCLOAK_APP_ADMIN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: transcribe-keycloak-secret
+          key: KEYCLOAK_APP_ADMIN_PASSWORD
+    - name: KC_HTTP_MANAGEMENT_PORT
+      value: '9000'
+    ports:
+    - containerPort: 8185
+      hostPort: 8185
+      hostIP: 127.0.0.1
+    volumeMounts:
+    - name: keycloak-realm
+      mountPath: /opt/keycloak/data/import
+      readOnly: true
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: 9000
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 30
+  # Application data (ports are internal to the shared pod).
+  - name: postgres
+    image: quay.io/sclorg/postgresql-16-c10s:latest
+    env:
+    - name: POSTGRESQL_USER
+      valueFrom:
+        configMapKeyRef:
+          name: transcribe-app-config
+          key: POSTGRES_USER
+    - name: POSTGRESQL_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: transcribe-app-secret
+          key: POSTGRES_PASSWORD
+    - name: POSTGRESQL_DATABASE
+      valueFrom:
+        configMapKeyRef:
+          name: transcribe-app-config
+          key: POSTGRES_DB
+    ports:
+    - containerPort: 5432
+    volumeMounts:
+    - name: transcribe-pgdata
+      mountPath: /var/lib/pgsql/data
+    readinessProbe:
+      exec:
+        command:
+        - pg_isready
+        - -U
+        - app
+        - -d
+        - app
+      initialDelaySeconds: 5
+      periodSeconds: 5
+  - name: redis
+    image: quay.io/sclorg/redis-7-c9s:latest
+    args:
+    - run-redis
+    - --appendonly
+    - 'yes'
+    - --appendfsync
+    - everysec
+    ports:
+    - containerPort: 6379
+    readinessProbe:
+      exec:
+        command:
+        - redis-cli
+        - ping
+      initialDelaySeconds: 3
+      periodSeconds: 5
+    volumeMounts:
+    - name: transcribe-redis-data
+      mountPath: /var/lib/redis/data
+  # Audio storage: master, filer, volumes and S3 in one persistent service.
+  # No storage ports are published; all app containers share this pod's loopback.
+  - name: seaweedfs
+    image: docker.io/chrislusf/seaweedfs:4.52
+    args:
+    - mini
+    - -dir=/data
+    - -ip=127.0.0.1
+    - -ip.bind=127.0.0.1
+    - -s3.port=8333
+    - -volume.port=9340
+    - -webdav=false
+    - -admin.ui=false
+    - -admin.port.legacy=0
+    - -s3.port.iceberg=0
+    - -s3.port.lance=0
+    env:
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: transcribe-app-secret
+          key: AUDIO_S3_ACCESS_KEY
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: transcribe-app-secret
+          key: AUDIO_S3_SECRET_KEY
+    - name: S3_BUCKET
+      valueFrom:
+        configMapKeyRef:
+          name: transcribe-app-config
+          key: AUDIO_S3_BUCKET
+    volumeMounts:
+    - name: transcribe-seaweedfs-data
+      mountPath: /data
+    startupProbe:
+      exec:
+        command:
+        - curl
+        - --fail
+        - --silent
+        - --max-time
+        - '3'
+        - http://127.0.0.1:9333/dir/status
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 36
+    readinessProbe:
+      exec:
+        command:
+        - curl
+        - --fail
+        - --silent
+        - --max-time
+        - '3'
+        - http://127.0.0.1:9333/dir/status
+      periodSeconds: 10
+      timeoutSeconds: 5
+  # API: waits for the audio bucket and applies migrations; workers await both.
+  - name: backend
+    image: localhost/root-transcribe:latest
+    imagePullPolicy: Never
+    env:
+    - name: RUN_MIGRATIONS
+      value: 'true'
+    envFrom:
+    - configMapRef:
+        name: transcribe-app-config
+    - secretRef:
+        name: transcribe-app-secret
+    ports:
+    - containerPort: 8000
+      hostPort: 8010
+      hostIP: 127.0.0.1
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8000
+      initialDelaySeconds: 15
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: 8000
+      initialDelaySeconds: 15
+      periodSeconds: 10
+    startupProbe:
+      httpGet:
+        path: /health
+        port: 8000
+      periodSeconds: 5
+      failureThreshold: 60
+  # Background processing: general queue, scheduler, transcription queue.
+  - name: worker
+    image: localhost/root-transcribe:latest
+    imagePullPolicy: Never
+    env:
+    - name: LOKI_SERVICE_NAME
+      value: celery-worker
+    - name: PROMETHEUS_MULTIPROC_DIR
+      value: /tmp/prom-metrics
+    - name: WORKER_METRICS_PORT
+      value: '9465'
+    - name: WAIT_FOR_MIGRATIONS
+      value: 'true'
+    envFrom:
+    - configMapRef:
+        name: transcribe-app-config
+    - secretRef:
+        name: transcribe-app-secret
+    args:
+    - celery
+    - -A
+    - app.worker.celery_app
+    - worker
+    - --hostname=main@%h
+    - -l
+    - info
+    - -Q
+    - celery
+    - --concurrency
+    - '2'
+  - name: beat
+    image: localhost/root-transcribe:latest
+    imagePullPolicy: Never
+    envFrom:
+    - configMapRef:
+        name: transcribe-app-config
+    - secretRef:
+        name: transcribe-app-secret
+    args:
+    - celery
+    - -A
+    - app.worker.celery_app
+    - beat
+    - -l
+    - info
+    - -s
+    - /tmp/celerybeat-schedule
+    - --pidfile
+    - /tmp/celerybeat.pid
+    env:
+    - name: WAIT_FOR_MIGRATIONS
+      value: 'true'
+  - name: stt-worker
+    image: localhost/root-transcribe-stt:latest
+    imagePullPolicy: Never
+    env:
+    - name: LOKI_SERVICE_NAME
+      value: celery-stt-worker
+    - name: PROMETHEUS_MULTIPROC_DIR
+      value: /tmp/prom-metrics
+    - name: WORKER_METRICS_PORT
+      value: '9466'
+    - name: WAIT_FOR_MIGRATIONS
+      value: 'true'
+    envFrom:
+    - configMapRef:
+        name: transcribe-app-config
+    - secretRef:
+        name: transcribe-app-secret
+    resources:
+      requests:
+        cpu: '1'
+        memory: 2Gi
+      limits:
+        cpu: '4'
+        memory: 6Gi
+    startupProbe:
+      exec:
+        command:
+        - worker-ping
+      periodSeconds: 15
+      failureThreshold: 40
+    livenessProbe:
+      exec:
+        command:
+        - worker-ping
+      periodSeconds: 60
+      timeoutSeconds: 30
+      failureThreshold: 3
+    readinessProbe:
+      exec:
+        command:
+        - worker-ping
+      periodSeconds: 60
+      timeoutSeconds: 30
+      failureThreshold: 2
+    volumeMounts:
+    - name: transcribe-stt-hf-cache
+      mountPath: /app/.cache/huggingface
+  # Browser entry point: serves the UI and proxies /api to the API.
+  - name: frontend
+    image: localhost/root-transcribe-frontend:latest
+    imagePullPolicy: Never
+    ports:
+    - containerPort: 8080
+      hostPort: 8095
+      hostIP: 127.0.0.1
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  volumes:
+  - name: transcribe-seaweedfs-data
+    persistentVolumeClaim:
+      claimName: transcribe-seaweedfs-data
+  - name: transcribe-keycloak-pgdata
+    persistentVolumeClaim:
+      claimName: transcribe-keycloak-pgdata
+  - name: keycloak-realm
+    configMap:
+      name: transcribe-keycloak-realm
+  - name: transcribe-pgdata
+    persistentVolumeClaim:
+      claimName: transcribe-pgdata
+  - name: transcribe-redis-data
+    persistentVolumeClaim:
+      claimName: transcribe-redis-data
+  - name: transcribe-stt-hf-cache
+    persistentVolumeClaim:
+      claimName: transcribe-stt-hf-cache

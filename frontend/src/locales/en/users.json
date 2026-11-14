@@ -1,0 +1,66 @@
+{
+  "list": {
+    "title": "Users",
+    "searchAria": "Search users",
+    "searchPlaceholder": "Search by email or name",
+    "emptyTitle": "No users yet",
+    "emptyBody": "Users appear here after their first Keycloak login.",
+    "loading": "Loading users",
+    "tableAria": "Users",
+    "colEmail": "Email",
+    "colFullName": "Full name",
+    "colRole": "Role",
+    "colStatus": "Status",
+    "colUserId": "User ID",
+    "colActions": "Actions",
+    "copyUserId": "Copy user ID for {{email}}",
+    "saveError": "Could not save user",
+    "roleFilterAria": "Filter by role",
+    "statusFilterAria": "Filter by status",
+    "allRoles": "All roles",
+    "allStatuses": "All statuses"
+  },
+  "profile": {
+    "title": "My profile",
+    "pictureTitle": "Profile picture",
+    "pictureHelp": "Upload a square image (PNG or JPG, max 256 KB).",
+    "uploadPicture": "Upload picture",
+    "remove": "Remove",
+    "uploadAria": "Upload profile picture",
+    "avatarAlt": "Your profile picture",
+    "tooLarge": "Image is too large (max 256 KB).",
+    "readError": "Could not read the image file",
+    "avatarUpdateError": "Could not update the profile picture",
+    "copyUserId": "Copy your user ID",
+    "description": "Manage your profile picture and the details you sign in with.",
+    "detailsTitle": "Account details",
+    "avatarUpdated": "Profile picture updated",
+    "avatarRemoved": "Profile picture removed",
+    "voice": {
+      "itemName": "Your voiceprints",
+      "deleteTitle": "Delete your voiceprints?",
+      "deleteConsequence": "Meetings can no longer name you automatically until you enroll again.",
+      "deleted": "Voiceprints deleted",
+      "deleteError": "Could not delete your voiceprints"
+    }
+  },
+  "toast": {
+    "updated": "User updated",
+    "deleted": "User {{email}} deleted"
+  },
+  "delete": {
+    "title": "Delete user?",
+    "consequence": "They can no longer sign in."
+  },
+  "identity": {
+    "profileHelp": "Manage your name, email, password, and sign-in security in Keycloak.",
+    "manageAccount": "Manage account in Keycloak",
+    "manageUsers": "Manage users in Keycloak",
+    "openError": "Could not open account management. Try again.",
+    "listHelp": "Accounts and roles are managed in Keycloak. Users appear here after their first login. Suspend access here to block this application.",
+    "suspend": "Suspend access",
+    "restore": "Restore access",
+    "suspendFor": "Suspend access for {{email}}",
+    "restoreFor": "Restore access for {{email}}"
+  }
+}

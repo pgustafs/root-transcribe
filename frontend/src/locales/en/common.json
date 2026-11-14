@@ -1,0 +1,117 @@
+{
+  "unknown": "unknown",
+  "app": {
+    "fallbackName": "Console"
+  },
+  "nav": {
+    "primary": "Primary",
+    "administration": "Administration",
+    "users": "Users",
+    "workspaces": "Workspaces",
+    "jobs": "Background jobs",
+    "speakers": "Speakers",
+    "menu": "Menu",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu"
+  },
+  "masthead": {
+    "globalNavigation": "Global navigation",
+    "selectLanguage": "Select language",
+    "accountMenu": "Account menu — {{account}}",
+    "account": "Account",
+    "myProfile": "My profile",
+    "logout": "Log out",
+    "skipToContent": "Skip to content"
+  },
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "remove": "Remove",
+    "close": "Close",
+    "create": "Create",
+    "edit": "Edit",
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "dataState": {
+    "loading": "Loading",
+    "errorTitle": "Could not load data",
+    "emptyTitle": "Nothing here yet",
+    "emptyBody": "There is nothing to display yet.",
+    "filteredTitle": "No results match",
+    "filteredBody": "Adjust or clear the filters to see more results.",
+    "clearFilters": "Clear all filters",
+    "retry": "Try again"
+  },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "body": "An unexpected error occurred while rendering this page. You can try reloading.",
+    "reload": "Reload page"
+  },
+  "confirmDelete": {
+    "defaultTitle": "Delete this item?",
+    "body": "<strong>{{name}}</strong> will be permanently deleted. This cannot be undone."
+  },
+  "notificationsBell": {
+    "toggleAria_one": "Notifications ({{count}} unread)",
+    "toggleAria_other": "Notifications ({{count}} unread)"
+  },
+  "alert": {
+    "custom": "Custom alert:",
+    "info": "Info alert:",
+    "success": "Success alert:",
+    "warning": "Warning alert:",
+    "danger": "Danger alert:"
+  },
+  "rowActionsAria": "Row actions",
+  "unknownValue": "Unknown",
+  "role": {
+    "admin": "Administrator",
+    "power_user": "Power user",
+    "feedback_reviewer": "Feedback reviewer",
+    "user": "User"
+  },
+  "status": {
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "pagination": {
+    "itemsPerPage": "Items per page",
+    "toFirstPage": "Go to first page",
+    "toPreviousPage": "Go to previous page",
+    "toLastPage": "Go to last page",
+    "toNextPage": "Go to next page",
+    "label": "Pagination",
+    "of": "of"
+  },
+  "search": {
+    "reset": "Clear search"
+  },
+  "errorPages": {
+    "goToDashboard": "Go to workspaces",
+    "notFound": {
+      "documentTitle": "Page not found",
+      "title": "404: Page not found",
+      "body": "The page does not exist or has moved. Check the address or return to workspaces."
+    },
+    "forbidden": {
+      "documentTitle": "Access denied",
+      "title": "403: Access denied",
+      "body": "You do not have permission to view this page. If you need access, contact an administrator."
+    }
+  },
+  "dsar": {
+    "emptyTitle": "No exports yet",
+    "emptyBody": "Request an export to collect everything held about a data subject.",
+    "requested": "Export requested",
+    "downloadFailed": "Could not download the export"
+  },
+  "breadcrumb": "Breadcrumb",
+  "theme": {
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  }
+}

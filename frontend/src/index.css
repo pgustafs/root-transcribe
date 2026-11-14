@@ -1,0 +1,652 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@source "./";
+
+/* ── enrooted identity (grafisk identitet 2026-10-29v2) ────────────────────────
+   Theme from the enrooted-glass-ui skill (templates/index.css), plus the tokens
+   this app needs on top (speaker colours, status surfaces).
+   Fonts: Poppins 500/600 for headings, labels and buttons; Lato 400/700 (+ italic)
+   for body text. Bundled brand originals, so the UI works without internet. */
+@font-face {
+  font-family: "Poppins";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("./assets/fonts/Poppins-Medium.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Poppins";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("./assets/fonts/Poppins-SemiBold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Lato";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("./assets/fonts/Lato-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Lato";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("./assets/fonts/Lato-Bold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Lato";
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  src: url("./assets/fonts/Lato-Italic.ttf") format("truetype");
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: Poppins, Montserrat, system-ui, sans-serif;
+  --font-sans: Lato, "Open Sans", Calibri, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-link: var(--link);
+  --color-accent-line: var(--accent-line);
+  --color-body: var(--body-text);
+  --color-status-ok: var(--status-ok);
+  --color-status-warn: var(--status-warn);
+  --color-on-accent: var(--on-accent);
+  /* Error/warning *text*: orange is never a text colour, so the words stay in the
+     normal text colour and the orange goes on the surface/border/icon. */
+  --color-warn-text: var(--foreground);
+  --color-success: var(--success);
+  --color-success-surface: var(--success-surface);
+  --color-warning: var(--warning);
+  --color-warning-surface: var(--warning-surface);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Palette: navy #0D1835, white, turquoise #00C2CB (the one accent), green #22C55E
+   (OK) and orange #FF7A00 (warning/error) as status colours only, light grey
+   #F4F6FA, navy 20 % #CFD3DD, navy 80 % #3D4560. Light = "vit", dark = "navy".
+   Text on turquoise/green/orange is always navy. */
+:root {
+  --native-color-scheme: light;
+  --background: #ffffff;
+  --foreground: #0d1835;
+  --body-text: #3d4560;
+  --card: #ffffff;
+  --card-foreground: #0d1835;
+  --popover: #ffffff;
+  --popover-foreground: #0d1835;
+  --primary: #00c2cb;
+  --primary-foreground: #0d1835;
+  --on-accent: #0d1835;
+  --secondary: #f4f6fa;
+  --secondary-foreground: #0d1835;
+  --muted: #f4f6fa;
+  --muted-foreground: #3d4560;
+  --accent: rgba(0, 194, 203, 0.08);
+  --accent-foreground: #0d1835;
+  --destructive: #ff7a00;
+  --status-ok: #22c55e;
+  --status-warn: #ff7a00;
+  /* Status surfaces (badges, diff lines): tint + coloured edge, navy words. */
+  --success: #22c55e;
+  --success-surface: rgba(34, 197, 94, 0.12);
+  --warning: #ff7a00;
+  --warning-surface: rgba(255, 122, 0, 0.12);
+  --border: #cfd3dd;
+  --input: #cfd3dd;
+  --ring: #00787e;
+  --link: #00787e;
+  --accent-line: #00a0a8;
+  --chart-1: #00c2cb;
+  --chart-2: #22c55e;
+  --chart-3: #ff7a00;
+  --chart-4: #3d4560;
+  --chart-5: #cfd3dd;
+  --radius: 0.5rem;
+  --sidebar: #f4f6fa;
+  --sidebar-foreground: #0d1835;
+  --sidebar-primary: #00c2cb;
+  --sidebar-primary-foreground: #0d1835;
+  --sidebar-accent: rgba(0, 194, 203, 0.08);
+  --sidebar-accent-foreground: #0d1835;
+  --sidebar-border: #cfd3dd;
+  --sidebar-ring: #00787e;
+  /* Speaker lanes in the transcript timeline (data colours, not decoration). */
+  --speaker-0: #00a0a8;
+  --speaker-1: #7d56bb;
+  --speaker-2: #168743;
+  --speaker-3: #ba5900;
+  --speaker-4: #c74b65;
+  --speaker-5: #426bb0;
+}
+
+.dark {
+  --native-color-scheme: dark;
+  --background: #0d1835;
+  --foreground: #ffffff;
+  --body-text: #ffffff;
+  --card: #0d1835;
+  --card-foreground: #ffffff;
+  --popover: #0d1835;
+  --popover-foreground: #ffffff;
+  --primary: #00c2cb;
+  --primary-foreground: #0d1835;
+  --secondary: #1a2542;
+  --secondary-foreground: #ffffff;
+  --muted: #1a2542;
+  --muted-foreground: #a8b2ca;
+  --accent: rgba(0, 194, 203, 0.12);
+  --accent-foreground: #ffffff;
+  --destructive: #ff7a00;
+  --success-surface: rgba(34, 197, 94, 0.16);
+  --warning-surface: rgba(255, 122, 0, 0.16);
+  --border: #3d4560;
+  --input: #3d4560;
+  --ring: #00c2cb;
+  --link: #00c2cb;
+  --accent-line: #00c2cb;
+  --sidebar: #0d1835;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #00c2cb;
+  --sidebar-primary-foreground: #0d1835;
+  --sidebar-accent: rgba(0, 194, 203, 0.12);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #3d4560;
+  --sidebar-ring: #00c2cb;
+  --speaker-0: #00c2cb;
+  --speaker-1: #bb9cf2;
+  --speaker-2: #22c55e;
+  --speaker-3: #ff7a00;
+  --speaker-4: #ff96b0;
+  --speaker-5: #8db6ff;
+  color-scheme: dark;
+}
+
+/* Loading indicator: the tri-colour trilogin, 360° in 2.4 s, linear.
+   The only rotation the identity allows. */
+@keyframes enrooted-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.enrooted-spin {
+  animation: enrooted-spin 2.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .enrooted-spin {
+    animation-duration: 6s;
+  }
+}
+
+/* ── Glass surfaces ────────────────────────────────────────────────────────────
+   Deliberate, requested exception to the identity's "flat" rule. Colours stay in
+   the enrooted palette. Outside Tailwind's layers on purpose, so they win over
+   the components' own bg-* utilities. */
+:root {
+  --glass-blur: blur(12px) saturate(1.6);
+  --glass-chrome: color-mix(in srgb, var(--sidebar) 70%, transparent);
+  --glass-card: color-mix(in srgb, var(--card) 72%, transparent);
+  --glass-popover: color-mix(in srgb, var(--popover) 80%, transparent);
+  --backdrop-1: rgba(0, 194, 203, 0.16);
+  --backdrop-2: rgba(34, 197, 94, 0.1);
+}
+.dark {
+  --glass-chrome: color-mix(in srgb, #1a2542 55%, transparent);
+  --glass-card: color-mix(in srgb, #1a2542 68%, transparent);
+  --glass-popover: color-mix(in srgb, #1a2542 82%, transparent);
+  --backdrop-1: rgba(0, 194, 203, 0.2);
+  --backdrop-2: rgba(34, 197, 94, 0.12);
+}
+.app-backdrop {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(52rem 34rem at 78% -8%, var(--backdrop-1), transparent 62%),
+    radial-gradient(46rem 32rem at 12% 108%, var(--backdrop-2), transparent 60%);
+}
+/* Tier 1: navigation chrome (rail, list panel, title bar, side panel). */
+.glass-chrome {
+  background: var(--glass-chrome);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+/* Tier 2: cards that float over content. */
+.glass-card {
+  background: var(--glass-card);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+/* Menus, popovers, dialogs and drawers. */
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="popover-content"],
+[data-slot="select-content"],
+[data-slot="hover-card-content"],
+[data-slot="dialog-content"],
+[data-slot="alert-dialog-content"],
+[data-slot="sheet-content"] {
+  background: var(--glass-popover);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  :root {
+    --glass-chrome: var(--sidebar);
+    --glass-card: var(--card);
+    --glass-popover: var(--popover);
+  }
+  .dark {
+    --glass-chrome: #1a2542;
+    --glass-card: #1a2542;
+    --glass-popover: #1a2542;
+  }
+}
+
+/* Toasts: the words stay in the normal text colour; only the icon shows status. */
+[data-sonner-toast][data-type="success"] [data-icon] {
+  color: var(--status-ok);
+}
+[data-sonner-toast][data-type="error"] [data-icon],
+[data-sonner-toast][data-type="warning"] [data-icon] {
+  color: var(--status-warn);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    margin: 0;
+  }
+  /* Poppins for headings and UI labels: shadcn Buttons, tabs, labels, titles,
+     badges. Raw <button>s that wrap content (list rows) keep Lato. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  [data-slot="button"],
+  [role="tab"],
+  label,
+  th,
+  [data-slot="dialog-title"],
+  [data-slot="alert-dialog-title"],
+  [data-slot="sheet-title"],
+  [data-slot="card-title"],
+  [data-slot="badge"],
+  [data-slot="dropdown-menu-label"] {
+    font-family: var(--font-heading);
+  }
+  /* Cards carry no shadow; depth comes from the glass surfaces. */
+  [data-slot="card"] {
+    box-shadow: none;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+  }
+}
+@layer components {
+  /* Eyebrow: small section label above a group of rows. */
+  .eyebrow {
+    @apply px-2 text-[0.6875rem] font-medium tracking-[0.1em] text-link uppercase;
+  }
+  .app-page {
+    @apply flex min-h-0 flex-1 flex-col overflow-y-auto pt-12;
+  }
+  .page-heading {
+    @apply shrink-0 px-4 pt-6 pb-4 md:px-6;
+  }
+  .page-title {
+    @apply text-2xl font-semibold tracking-tight;
+  }
+  .section-title {
+    @apply text-lg font-semibold tracking-tight;
+  }
+  .page-section {
+    @apply px-4 pb-6 md:px-6;
+  }
+  .app-copy {
+    @apply leading-relaxed;
+  }
+  small.app-copy {
+    @apply text-sm text-muted-foreground;
+  }
+  .skip-link {
+    @apply sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded-md focus:bg-background focus:p-3;
+  }
+  .login-shell {
+    @apply flex min-h-dvh items-center justify-center p-6;
+  }
+  .workspace-editor {
+    @apply flex h-full min-h-[34rem] flex-col gap-3;
+  }
+  .workspace-split {
+    @apply grid min-h-0 flex-1 grid-cols-[17rem_1px_minmax(0,1fr)] gap-0 overflow-hidden py-0;
+  }
+  .recording-library {
+    @apply flex min-h-0 flex-col;
+  }
+  .recording-library-heading {
+    @apply flex h-16 shrink-0 items-center justify-between gap-2 px-4;
+  }
+  .recording-library-list {
+    @apply min-h-0 flex-1 overflow-y-auto p-2;
+  }
+  .recording-library-help {
+    @apply shrink-0;
+  }
+  .recording-library-help small {
+    @apply text-xs;
+  }
+  .ws-diff {
+    @apply overflow-x-auto rounded-md border font-mono text-sm;
+  }
+  .ws-diff-line {
+    @apply flex gap-2 border-l-2 border-transparent px-2 whitespace-pre-wrap wrap-anywhere;
+  }
+  .ws-diff-sign {
+    @apply w-[1ch] shrink-0 select-none;
+  }
+  /* Green/orange mark the change on the edge and surface; the words stay navy. */
+  .ws-diff-line--added {
+    @apply border-l-status-ok bg-success-surface;
+  }
+  .ws-diff-line--removed {
+    @apply border-l-status-warn bg-warning-surface;
+  }
+  .ws-diff-line--skip {
+    @apply bg-muted text-center text-muted-foreground select-none;
+  }
+  .ws-comment--reply {
+    @apply ml-6;
+  }
+  .ws-comment-quote {
+    @apply my-1 border-l-2 pl-2 text-muted-foreground;
+  }
+  .ws-comment-body {
+    @apply mb-1 whitespace-pre-wrap;
+  }
+  .ws-comment-composer {
+    @apply relative;
+  }
+  .ws-comment-mentions {
+    @apply absolute bottom-full left-0 z-50 mb-1 min-w-64;
+  }
+  .meeting-audio-shell {
+    @apply w-full min-w-0;
+  }
+  .meeting-audio-player {
+    @apply block h-14 min-h-14 w-full min-w-0;
+    color-scheme: var(--native-color-scheme);
+  }
+  .recording-dock-panel {
+    @apply max-h-[calc(100dvh-8rem)] shrink-0 overflow-auto border-t;
+  }
+  .recording-dock {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+  .recording-dock-title-cell {
+    @apply min-w-0;
+  }
+  .recording-dock-title {
+    @apply truncate;
+  }
+  .visually-hidden-file-input {
+    @apply sr-only;
+  }
+  /* List rows: hover = navy tint 5 %, selected = navy tint 8 % (not turquoise). */
+  .meeting-row {
+    @apply relative mb-1 grid grid-cols-[minmax(0,1fr)_2rem] rounded-lg hover:bg-foreground/5;
+  }
+  .meeting-row-selected {
+    @apply bg-foreground/8 hover:bg-foreground/8;
+  }
+  .meeting-row-select {
+    @apply flex min-w-0 flex-col items-start gap-2 rounded-lg p-3 text-left;
+  }
+  .meeting-row-title {
+    @apply w-full truncate text-sm font-medium;
+  }
+  .meeting-row-date {
+    @apply text-xs text-muted-foreground;
+  }
+  .meeting-row-meta {
+    @apply flex flex-wrap items-center gap-2 text-xs text-muted-foreground tabular-nums;
+  }
+  .meeting-row-actions {
+    @apply pt-2;
+  }
+  .meetings-detail-pane {
+    @apply min-h-0 min-w-0 overflow-y-auto;
+  }
+  .meetings-detail {
+    @apply flex h-full min-h-0 flex-col;
+  }
+  .recording-detail-header {
+    @apply flex shrink-0 flex-row items-start justify-between gap-3 p-5;
+  }
+  .recording-detail-content {
+    @apply flex min-h-0 flex-1 flex-col gap-4 px-5 pt-4 pb-0;
+  }
+  .recording-detail-content > * {
+    @apply shrink-0;
+  }
+  .meeting-playback {
+    @apply flex w-full min-w-0 flex-col gap-1;
+  }
+  .meeting-playback-tools {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .recording-detail-content > .transcript-tabs {
+    @apply min-h-0 flex-1 shrink gap-0;
+  }
+  .transcript-panel {
+    @apply mt-4 flex min-h-0 flex-col gap-3;
+  }
+  .transcript-toolbar {
+    @apply flex flex-wrap items-center justify-between gap-3;
+  }
+  .transcript-toolbar > [data-slot="input-group"] {
+    @apply w-full flex-1 basis-56;
+  }
+  .transcript-timeline {
+    @apply flex flex-col gap-1;
+  }
+  .transcript-scroll {
+    @apply min-h-36 flex-1 overflow-y-auto py-4;
+  }
+  .transcript-help {
+    @apply mx-auto mb-4 max-w-3xl text-xs text-muted-foreground;
+  }
+  .transcript-document {
+    @apply mx-auto flex max-w-3xl flex-col gap-2 pb-6;
+  }
+  .meeting-seg {
+    @apply flex flex-col gap-2 rounded-md border-l-2 border-transparent p-3;
+  }
+  .meeting-seg-active {
+    @apply border-l-accent-line bg-foreground/5;
+  }
+  .transcript-text {
+    @apply px-2 text-base leading-7 text-body whitespace-pre-wrap wrap-anywhere;
+  }
+  .meeting-speed-select {
+    @apply min-w-22;
+  }
+  .meeting-revision-text {
+    @apply max-h-88 overflow-auto whitespace-pre-wrap;
+  }
+  .meeting-approval-note {
+    @apply max-w-72;
+  }
+  .meeting-timeline {
+    @apply h-3 w-full cursor-pointer rounded-sm bg-muted;
+  }
+  .meeting-lane {
+    @apply opacity-85 hover:opacity-100;
+  }
+  .meeting-playhead {
+    stroke: var(--foreground);
+    stroke-width: 2;
+  }
+  .stat-value {
+    @apply text-3xl leading-tight font-semibold;
+  }
+  .wrap-anywhere {
+    overflow-wrap: anywhere;
+  }
+  .recording-guide {
+    @apply rounded-xl bg-muted p-6 text-start;
+  }
+  .recording-guide h2 {
+    @apply mb-4 text-xl font-semibold;
+  }
+  .recording-guide ol {
+    @apply grid list-none grid-cols-1 gap-6 p-0 lg:grid-cols-3;
+  }
+  .recording-guide li {
+    @apply flex items-start gap-3;
+  }
+  .recording-guide h3 {
+    @apply mb-1 font-semibold;
+  }
+  .recording-guide p {
+    @apply text-sm leading-relaxed text-muted-foreground;
+  }
+  .recording-guide-number {
+    @apply grid size-8 shrink-0 place-items-center rounded-full border bg-card font-heading font-semibold;
+  }
+  .meetings-detail .recording-guide ol,
+  .meetings-detail-pane > [data-slot="empty"] .recording-guide ol {
+    @apply grid-cols-1;
+  }
+  .speaker-turn-count {
+    @apply text-xs text-muted-foreground;
+  }
+  .speaker-dot {
+    @apply size-2.5 shrink-0 rounded-full;
+  }
+}
+.meeting-lane-0 {
+  fill: var(--speaker-0);
+}
+.speaker-color-0 {
+  background: var(--speaker-0);
+}
+.meeting-lane-1 {
+  fill: var(--speaker-1);
+}
+.speaker-color-1 {
+  background: var(--speaker-1);
+}
+.meeting-lane-2 {
+  fill: var(--speaker-2);
+}
+.speaker-color-2 {
+  background: var(--speaker-2);
+}
+.meeting-lane-3 {
+  fill: var(--speaker-3);
+}
+.speaker-color-3 {
+  background: var(--speaker-3);
+}
+.meeting-lane-4 {
+  fill: var(--speaker-4);
+}
+.speaker-color-4 {
+  background: var(--speaker-4);
+}
+.meeting-lane-5 {
+  fill: var(--speaker-5);
+}
+.speaker-color-5 {
+  background: var(--speaker-5);
+}
+@media (max-width: 48rem) {
+  .workspace-editor {
+    height: auto;
+  }
+  .workspace-split {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+  }
+  .recording-library-list {
+    max-height: 12rem;
+  }
+  .recording-library-help {
+    display: none;
+  }
+  .recording-detail-header {
+    padding: 1rem;
+  }
+  .recording-detail-content {
+    padding: 1rem;
+  }
+  .meetings-detail-pane {
+    flex: 0 0 auto;
+  }
+  .transcript-scroll {
+    overflow: visible;
+  }
+  .meeting-audio-player {
+    min-width: 12rem;
+  }
+}

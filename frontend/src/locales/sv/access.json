@@ -1,0 +1,76 @@
+{
+  "workspaces": {
+    "title": "Arbetsytor",
+    "subtitle": "Ordna inspelningar, transkribera ljud och granska transkript med talaretiketter.",
+    "create": "Ny arbetsyta",
+    "name": "Namn",
+    "empty": "Inga arbetsytor ännu",
+    "emptyBody": "Skapa en arbetsyta för dina inspelningar och transkript.",
+    "tableAria": "Arbetsytor",
+    "namePlaceholder": "t.ex. Intervjuer eller Teammöten",
+    "deleteTitle": "Ta bort arbetsyta?",
+    "deleteBody": "Arbetsytan och dess inspelningar raderas. Detta kan inte ångras.",
+    "colActions": "Åtgärder",
+    "visibility": {
+      "shared": "Delad",
+      "private": "Privat",
+      "restricted": "Begränsad"
+    },
+    "roles": {
+      "owner": "Ägare",
+      "editor": "Redaktör",
+      "viewer": "Läsare",
+      "manager": "Ansvarig"
+    },
+    "detail": {
+      "selectUser": "Välj en användare",
+      "roleLabel": "Roll",
+      "addMember": "Lägg till medlem",
+      "noMembers": "Inga medlemmar ännu",
+      "membersAria": "Arbetsytans medlemmar",
+      "memberEmail": "Medlem",
+      "emailLabel": "Medlemmens e-post",
+      "emailPlaceholder": "kollega@example.com",
+      "addMemberError": "Kunde inte lägga till medlemmen",
+      "memberHidden": "Dold",
+      "memberAdded": "{{member}} har lagts till",
+      "memberRemoved": "{{member}} har tagits bort",
+      "roleFor": "Roll för {{member}}",
+      "removeMember": "Ta bort {{member}}",
+      "roleError": "Kunde inte ändra rollen",
+      "removeError": "Kunde inte ta bort medlemmen",
+      "noMembersBody": "Lägg till medlemmar för att dela arbetsytan med dem.",
+      "removeMemberTitle": "Ta bort medlemmen?",
+      "removeMemberConsequence": "Personen förlorar åtkomsten till arbetsytan.",
+      "removeMemberConfirm": "Ta bort"
+    },
+    "createError": "Kunde inte skapa arbetsytan",
+    "comments": {
+      "empty": "Inga kommentarer ännu",
+      "showResolved": "Visa lösta",
+      "resolved": "Löst",
+      "resolve": "Markera som löst",
+      "reopen": "Öppna igen",
+      "reply": "Svara",
+      "replyingTo": "Svarar {{name}}",
+      "post": "Kommentera",
+      "editTitle": "Redigera kommentar",
+      "bodyAria": "Kommentarstext",
+      "bodyPlaceholder": "Skriv en kommentar",
+      "deletedUser": "Borttagen användare"
+    },
+    "description": "Beskrivning",
+    "searchAria": "Sök arbetsytor",
+    "searchPlaceholder": "Sök efter namn",
+    "colRole": "Din roll",
+    "colVisibility": "Synlighet",
+    "loading": "Läser in arbetsytor…",
+    "nameRequired": "Ange ett namn för arbetsytan.",
+    "deleteError": "Kunde inte ta bort arbetsytan",
+    "toast": {
+      "created": "Arbetsytan {{name}} har skapats",
+      "deleted": "Arbetsytan {{name}} har tagits bort"
+    },
+    "members": "Medlemmar"
+  }
+}

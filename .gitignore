@@ -1,0 +1,104 @@
+# Claude Code local settings / session data
+.claude/
+
+# Scratch / screenshots
+tmp/
+Nemotron.md
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# ---------------------------------------------------------------------------
+# Node / JavaScript (frontend)
+# ---------------------------------------------------------------------------
+# Unanchored so it also catches a stray node_modules accidentally created at the
+# repo root (e.g. a Vite/Vitest run launched from the wrong cwd drops a
+# node_modules/.vite cache here). frontend/node_modules is the real one.
+node_modules/
+.vite/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Environment / secrets
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+# Local tool folders that can hold credentials or session data
+.aws/
+.agents/
+.codex/
+
+# ---------------------------------------------------------------------------
+# Tooling caches
+# ---------------------------------------------------------------------------
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.cache/
+
+# Test / coverage artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+*.log
+
+# ---------------------------------------------------------------------------
+# Editors / IDEs
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---------------------------------------------------------------------------
+# OS files
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Local-only: cloned reference repos and manual config backups (never commit)
+# ---------------------------------------------------------------------------
+*.yaml_org
+
+# Generated or manually configured local manifests contain real secrets
+# (deploy/root-transcribe.local.yaml, .mac.local.yaml, .prepared.local.yaml).
+*.local.yaml
+
+# CodeGraph local index
+/.codegraph/
+
+# Playwright artifacts when a run is started from the repo root
+test-results/
+playwright-report/
+
+# Temporary extraction source, never an application dependency.
+/root-rag/
+
+# Local demo configuration and stable generated credentials
+/deploy/settings.env
+/deploy/secrets.local.json
+
+# Temporary shadcn reference checkout
+/ui/

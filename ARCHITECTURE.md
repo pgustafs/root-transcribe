@@ -1,0 +1,338 @@
+# Root Transcribe architecture
+
+Root Transcribe records or accepts audio, separates speakers, transcribes speech,
+and provides a workspace for reviewing, correcting and exporting the result.
+This document describes the implemented system. See [README.md](README.md) for
+installation and operations, [backend/README.md](backend/README.md) and
+[frontend/README.md](frontend/README.md) for development, and
+[Nemotron.md](Nemotron.md) for a deferred model-integration study.
+
+## Components and deployment boundaries
+
+The local deployment uses one Podman pod, `root-transcribe`, plus an independently
+managed speech-to-text server. Containers in the pod share a network namespace
+and reach each other through loopback addresses. The YAML is designed for
+`podman kube play`; it is not a production Kubernetes deployment package.
+
+```mermaid
+flowchart LR
+    Browser["Browser: React application"]
+    subgraph Pod["Podman pod: root-transcribe"]
+        Web["nginx: frontend and API proxy"]
+        API["FastAPI: identity, workspaces, recordings and review"]
+        KC["Keycloak"]
+        KCDB[("Identity PostgreSQL")]
+        DB[("Application PostgreSQL")]
+        Redis[("Redis: broker and results")]
+        Main["General Celery worker"]
+        STT["Transcription Celery worker"]
+        Beat["Celery beat scheduler"]
+        S3[("SeaweedFS: S3 audio")]
+    end
+    ASR["External ASR server: vLLM example"]
+    Browser -->|"HTTP / HTTPS"| Web
+    Browser -->|"OIDC with PKCE"| KC
+    Web -->|"/api and /health"| API
+    API -->|"Verify tokens via JWKS"| KC
+    KC --> KCDB
+    API --> DB
+    API --> S3
+    API -->|"Dispatch committed outbox work"| Redis
+    Beat -->|"Periodic tasks"| Redis
+    Redis -->|"celery queue"| Main
+    Redis -->|"transcription queue"| STT
+    Main --> DB
+    Main --> S3
+    Main -->|"Outbox dispatch"| Redis
+    STT --> DB
+    STT --> S3
+    STT -->|"OpenAI-compatible audio transcription"| ASR
+```
+
+| Component | Responsibility | Runtime/image |
+| --- | --- | --- |
+| Frontend | Capture, upload recovery, playback, transcript review, speaker directory, account and job screens | React 19, TypeScript, shadcn/ui; `root-transcribe-frontend` image |
+| API | Authentication, authorization, validation, storage coordination, review and export routes | FastAPI; `root-transcribe` image |
+| General worker | Outbox delivery, reconciliation, cleanup, privacy scans and data exports | Celery on `celery`; same image as API |
+| Transcription worker | Audio decoding, diarization, STT calls, speaker embeddings, clips and audio redaction | Celery on `transcription`; `root-transcribe-stt` image with the `stt` Python extra |
+| Scheduler | Enqueue periodic maintenance; run one instance per deployment | Celery beat; same image as API |
+| ASR server | Recognize speech and return text/timestamps | External OpenAI-compatible service; optional `root-transcribe-vllm` container |
+| PostgreSQL | Application records and durable work state; separate database container for Keycloak | PostgreSQL 16 |
+| Redis | Celery broker/result backend and shared request-rate counters | Redis 7 |
+| SeaweedFS | Original audio, retained enrollment samples, clips, redacted audio and export objects | Bundled `mini` service, version 4.52 |
+
+The API image has no local speech model. The STT worker loads pyannote models
+lazily and uses CUDA when visible, otherwise CPU. **The supplied app manifest does
+not assign a GPU to that worker**, so it runs diarization/embeddings on CPU by
+default. The separate vLLM example explicitly requests the NVIDIA GPU through CDI.
+
+Source: [manifest](deploy/root-transcribe.yaml), [entrypoint](deploy/entrypoint.sh),
+[Celery configuration](backend/app/worker/celery_app.py),
+[audio/model services](backend/app/services/diarization.py).
+
+## Recording and transcription flow
+
+Browser capture uses `MediaRecorder`. Chunks and session metadata are persisted
+in IndexedDB before upload. The recording provider survives navigation and
+supports recovery after a reload. Local recovery data expires after seven days.
+An accepted upload does not immediately delete the local copy: the UI waits for
+server-side validation and preserves rejected audio for recovery or explicit discard.
+
+Live recordings use resumable multipart upload sessions with checksummed parts.
+Picked files use a multipart form upload. Both paths go through the API to S3;
+the browser does not receive S3 credentials or require direct bucket access.
+Uploads are structurally checked on the client, then validated and decoded on
+the worker. The worker is the authority on media validity.
+
+```mermaid
+sequenceDiagram
+    participant UI as Browser
+    participant API as FastAPI
+    participant S3 as S3 storage
+    participant DB as PostgreSQL
+    participant Q as Redis / Celery
+    participant W as Transcription worker
+    participant ASR as ASR service
+    UI->>UI: Capture and persist local chunks, or select a file
+    UI->>API: Upload audio and requested language
+    API->>S3: Store file or multipart parts
+    API->>DB: Commit recording, attempt and outbox after upload completes
+    API-->>UI: Accepted recording ID
+    API->>Q: Try dispatching committed outbox task
+    Note over DB,Q: General worker retries undelivered outbox entries
+    Q->>W: Transcription attempt ID
+    W->>DB: Atomically claim attempt
+    W->>S3: Download audio to temporary file
+    W->>W: Decode 16 kHz mono WAV and diarize
+    W->>ASR: Full recording when under upload limit
+    ASR-->>W: Text and available timestamps
+    alt Genuine word timestamps available
+        W->>W: Align words with speaker turns
+    else No word timestamps or full file exceeds limit
+        loop Each speaker turn, split into at most 30-second pieces
+            W->>ASR: Transcribe audio slice with the same language choice
+            ASR-->>W: Slice text
+        end
+    end
+    W->>W: Match eligible enrolled speakers
+    W->>DB: Commit transcript revision and attempt result
+    UI->>API: Poll recording and revision
+    API-->>UI: Speaker-attributed transcript or actionable failure
+```
+
+The full-file branch is skipped above `STT_MAX_UPLOAD_MB` (default 25 MiB).
+At 16 kHz mono PCM16 this is approximately 13.7 minutes of decoded audio.
+The per-turn fallback is therefore also the normal path for longer recordings.
+Word alignment chooses the speaker turn with greatest overlap, or the nearest
+turn when a word falls in a gap. Overlapping speech and model errors can still
+require manual correction; numbered speaker labels are not verified identities.
+
+The worker streams compressed audio to disk and decodes file-to-file, but
+pyannote loads the complete decoded waveform into memory. Long recordings still
+need memory sizing; this is asynchronous processing after upload, not live
+streaming transcription.
+
+Source: [recording provider](frontend/src/components/recording/RecordingProvider.tsx),
+[local store](frontend/src/lib/recordingStore.ts),
+[upload manager](frontend/src/lib/uploadManager.ts),
+[recording routes](backend/app/api/v1/routes/meetings.py),
+[worker pipeline](backend/app/worker/tasks.py),
+[alignment](backend/app/services/transcript_align.py).
+
+## Language and ASR contract
+
+Recording and upload dialogs offer **Auto / English / Swedish**. Interface
+language is a separate preference and does not select the spoken language.
+
+| Saved `requested_language` | ASR request | Behavior |
+| --- | --- | --- |
+| `auto` | Omit `language` | The configured ASR service detects language |
+| `en` | `language="en"` | Request English transcription |
+| `sv` | `language="sv"` | Request Swedish transcription |
+
+The preference is stored with the recording and browser recovery metadata,
+and reused on retries and all speaker slices. The `language` field stores the
+provider's reported language independently. Existing database recordings receive
+`requested_language="auto"` through migration `0002_recording_language`.
+There is currently no UI to change an existing recording's saved preference.
+
+The worker uses one configured `STT_BASE_URL`, `STT_API_KEY` and `STT_MODEL` for
+all languages. There is no language-based provider routing. The client calls
+`/audio/transcriptions` relative to the base URL (normally ending in `/v1`),
+requests `verbose_json` and word/segment timestamps, and parses text, duration,
+language and timestamps. Segment-only timestamps trigger per-turn transcription.
+Language hints and timestamp accuracy depend on the chosen server/model.
+
+Source: [ASR client](backend/app/services/transcription.py),
+[recording schemas](backend/app/schemas/meeting.py),
+[language migration](backend/app/alembic/versions/0002_recording_language.py).
+
+## Durable work, retries and review
+
+PostgreSQL holds application state; Redis is the task transport. Creating a
+transcription attempt and its outbox entry in the same database transaction
+prevents a committed upload from depending on a single successful broker call.
+The API tries to dispatch immediately; scheduled outbox dispatch retries later.
+Delivery is at least once, with database claims and uniqueness constraints to
+handle duplicates. This is not an exactly-once queue guarantee.
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: Upload completed and attempt committed
+    pending --> running: Atomic worker claim
+    pending --> failed: Reconciliation exhausts enqueue budget
+    running --> completed: Result and revision committed
+    running --> failed: Processing error or stale heartbeat
+    pending --> cancelled: Recording or audio removed
+    running --> cancelled: Work invalidated
+    completed --> [*]
+    failed --> [*]
+    cancelled --> [*]
+```
+
+These are **attempt states**. A recording separately exposes progress such as
+`uploading`, `diarizing`, `transcribing` and `identifying`. A user retry creates a
+new attempt; it does not reset the identity of the old attempt. Media faults
+classified as non-retryable require a new valid upload. Only one pending/running
+attempt is allowed per recording.
+
+Each successful run creates a transcript revision with ordered, timestamped
+speaker segments. Human edits have optimistic version checks and edit events.
+Reprocessing attempts to carry edits forward and reports conflicts for review.
+Approval supersedes the previous approved revision; only one can be approved
+per recording. Review, comments, clip creation, redaction and export operate
+through permission-checked APIs. Exports support Markdown, text, SRT, VTT, DOCX
+and PDF; subtitle times are segment times.
+
+Source: [attempt model](backend/app/models/meeting_transcription_attempt.py),
+[outbox service](backend/app/services/task_outbox.py),
+[revision model](backend/app/models/meeting_transcript_revision.py),
+[export service](backend/app/services/transcript_export.py).
+
+## Identity, permissions and speaker data
+
+Keycloak owns login, password changes and identity roles. The browser uses OIDC
+authorization code flow with PKCE S256 and keeps the Keycloak session tokens in
+memory. The API validates issuer, audience and signatures using JWKS, resolves
+the local user profile, and applies local account suspension. Keycloak data lives
+in its own PostgreSQL volume.
+
+Workspace roles are owner, manager, editor and viewer. Audio-specific capabilities
+separately govern listening, downloading, editing, export, approval, redaction,
+retention and other operations. Overrides can target roles or individual users;
+user overrides are applied after role overrides. Global administrators receive
+the full base capability set. Backend checks, including sensitivity restrictions,
+remain authoritative even when the UI hides unavailable actions.
+
+Speaker profiles can exist without voiceprints. Enrolling a voice sample and
+matching it to recordings require applicable speaker-identification consent.
+The worker compares model-compatible embeddings using similarity thresholds,
+a margin over the next candidate and suitable speaker turns. Uncertain matches
+become suggestions for review. Naming a speaker in a transcript does not enroll
+a voiceprint or establish consent.
+
+Voiceprint vectors are Fernet-encrypted in PostgreSQL. The default encryption
+key derives from `SECRET_KEY`; configured named keys allow explicit rotation.
+Original audio and retained samples are S3 objects: voiceprint encryption does
+not imply that all stored audio is application-encrypted. Retaining raw enrollment
+samples has its own consent checks. Historical consent values remain readable
+and withdrawable for existing records, but new grants are limited to identification
+and sample retention.
+
+Playback uses short-lived, signed URLs issued after authorization. Range requests
+stream through the API for seeking; signed playback URLs do not grant direct S3
+access. The DLP service finds candidate sensitive spans using configured rules and
+terms. Review and redaction are explicit operations, not a guarantee that every
+sensitive item has been detected.
+
+Retention overrides currently apply to **raw recording audio only**. Transcript
+and clip retention policies are not implemented. Voiceprints use profile retention
+and consent checks. Legal holds prevent applicable deletion. Audio deletion is
+tracked durably and retried; metadata reports deletion only after storage confirms
+it. Backups must include the database, objects and encryption keys together.
+
+Source: [API identity dependencies](backend/app/api/deps.py),
+[token verification](backend/app/core/oidc.py),
+[capabilities](backend/app/core/meeting_permissions.py),
+[speaker directory](backend/app/services/speaker_directory.py),
+[retention](backend/app/services/retention.py),
+[audio lifecycle](backend/app/models/audio_object.py).
+
+## Persistence and configuration
+
+The schema groups records into accounts/workspaces/membership, recordings/upload
+sessions, transcription attempts/outbox/jobs, revisions/segments/edit events,
+speakers/voiceprints/consent/suggestions, and comments/clips/privacy/audit records.
+Audio bytes live in S3; database rows hold opaque keys and lifecycle metadata.
+Browser IndexedDB contains local recovery copies, independently of server storage.
+
+Alembic migrations are explicit and ordered. `0001_transcription` initializes
+an empty application database; `0002_recording_language` upgrades it. Run
+`alembic upgrade head` for both new installations and upgrades. Do not edit an
+applied migration or change version markers to bypass an upgrade. Schema parity
+and upgrade/downgrade checks are in
+[the architecture tests](backend/tests/unit/test_extraction.py).
+
+| Persistent volume / location | Contents |
+| --- | --- |
+| `transcribe-pgdata` | Application PostgreSQL |
+| `transcribe-keycloak-pgdata` | Keycloak PostgreSQL |
+| `transcribe-redis-data` | Redis persistence |
+| `transcribe-seaweedfs-data` | Audio objects and SeaweedFS metadata/state |
+| `transcribe-stt-hf-cache` | Downloaded diarization/embedding models |
+| Host `$HOME/.local/share/root-transcribe/vllm/` | Optional vLLM model and API key |
+| `deploy/secrets.local.json` and the active local manifest | Stable credentials and effective deployment configuration |
+
+`deploy/configure.py` combines the small `settings.env` input, generated secrets,
+realm import and infrastructure template. It produces private local manifests;
+`root-transcribe.yaml` alone is only the infrastructure template. Prepared
+manifests are edited and launched explicitly, without regeneration. Backend
+runtime defaults live in [config.py](backend/app/core/config.py); advanced
+settings require a custom manifest, not arbitrary additions to `settings.env`.
+
+The API entrypoint waits for infrastructure and runs migrations. Workers and beat
+wait for the migration head before starting. Bucket access is checked with the
+configured credentials. The supplied SeaweedFS deployment creates the bucket.
+A separately managed S3 store must already provide it.
+
+## Ports, health and operational limits
+
+| Service | Pod/container port | Host publication in the example |
+| --- | --- | --- |
+| Frontend nginx | 8080 | `127.0.0.1:8095` |
+| API | 8000 | `127.0.0.1:8010` |
+| Keycloak | 8185 | `127.0.0.1:8185` |
+| PostgreSQL / Redis / S3 | 5432 / 6379 / 8333 | Internal only |
+| General / transcription worker metrics | 9465 / 9466 | Internal only |
+| Separate vLLM | 8000 in its own container | Host port 8002, all interfaces in the serving example |
+
+The frontend proxies `/api/` and `/health` to the API. API `/health/ready` checks the
+application database. Public `/api/v1/config` reports transcription availability
+from configuration and a cached queue-consumer check; it does not probe live ASR
+inference or prove model access. The STT worker probe checks Celery responsiveness.
+Models load on first use, so an apparently healthy deployment still needs a real
+audio test.
+
+Structured logs include correlation IDs. API `/metrics` and worker metric servers
+can be scraped by external monitoring. Prometheus and Loki are not bundled;
+optional Loki log shipping requires a separately configured service.
+
+Default limits include 500 MiB uploads, 120 minutes of audio, 12 MiB multipart
+parts, a 24-hour upload-session lifetime, a 3,600-second ASR request timeout and a
+3,600-second stale-attempt threshold. General Celery defaults are 30-minute soft
+and 35-minute hard limits, but **transcription overrides them**: its soft limit
+is `STT_TIMEOUT_SECONDS` (60 minutes) and its hard limit adds 300 seconds
+(65 minutes). Clips, redaction, DLP scans and compliance exports have their own
+shorter task limits. Size task deadlines, request timeouts and stale-heartbeat
+thresholds together for the actual models and recording durations.
+
+Beat dispatches outbox work every 30 seconds and reconciles transcription attempts
+every 120 seconds. It also schedules audio deletion, expired-upload cleanup and
+job/audio retention. See the code for retry budgets and UTC schedules.
+
+The bundled Keycloak `start-dev`, single-host storage and loopback publications
+are intended for local use. Remote browser recording requires HTTPS and correct
+public frontend/identity origins. Production needs an appropriate identity,
+TLS, backup and service-management setup. The scripts do not install automatic
+host-boot startup. See the README's lifecycle commands before recreating containers:
+a plain container restart does not apply a new image or changed environment.

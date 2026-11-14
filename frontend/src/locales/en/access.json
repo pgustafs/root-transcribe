@@ -1,0 +1,76 @@
+{
+  "workspaces": {
+    "title": "Workspaces",
+    "subtitle": "Organize recordings, transcribe audio, and review speaker-labelled transcripts.",
+    "create": "New workspace",
+    "name": "Name",
+    "empty": "No workspaces yet",
+    "emptyBody": "Create a workspace for your recordings and transcripts.",
+    "tableAria": "Workspaces",
+    "namePlaceholder": "e.g. Interviews or Team meetings",
+    "deleteTitle": "Delete workspace?",
+    "deleteBody": "The workspace and its recordings will be deleted. This cannot be undone.",
+    "colActions": "Actions",
+    "visibility": {
+      "shared": "Shared",
+      "private": "Private",
+      "restricted": "Restricted"
+    },
+    "roles": {
+      "owner": "Owner",
+      "editor": "Editor",
+      "viewer": "Viewer",
+      "manager": "Manager"
+    },
+    "detail": {
+      "selectUser": "Select a user",
+      "roleLabel": "Role",
+      "addMember": "Add member",
+      "noMembers": "No members yet",
+      "membersAria": "Workspace members",
+      "memberEmail": "Member",
+      "emailLabel": "Member email",
+      "emailPlaceholder": "colleague@example.com",
+      "addMemberError": "Could not add the member",
+      "memberHidden": "Hidden",
+      "memberAdded": "{{member}} added",
+      "memberRemoved": "{{member}} removed",
+      "roleFor": "Role for {{member}}",
+      "removeMember": "Remove {{member}}",
+      "roleError": "Could not change the role",
+      "removeError": "Could not remove the member",
+      "noMembersBody": "Add members to share this workspace with them.",
+      "removeMemberTitle": "Remove member?",
+      "removeMemberConsequence": "They lose access to this workspace.",
+      "removeMemberConfirm": "Remove"
+    },
+    "createError": "Could not create the workspace",
+    "comments": {
+      "empty": "No comments yet",
+      "showResolved": "Show resolved",
+      "resolved": "Resolved",
+      "resolve": "Resolve",
+      "reopen": "Reopen",
+      "reply": "Reply",
+      "replyingTo": "Replying to {{name}}",
+      "post": "Comment",
+      "editTitle": "Edit comment",
+      "bodyAria": "Comment text",
+      "bodyPlaceholder": "Write a comment",
+      "deletedUser": "Deleted user"
+    },
+    "description": "Description",
+    "searchAria": "Search workspaces",
+    "searchPlaceholder": "Search by name",
+    "colRole": "Your role",
+    "colVisibility": "Visibility",
+    "loading": "Loading workspaces…",
+    "nameRequired": "Enter a workspace name.",
+    "deleteError": "Could not delete the workspace",
+    "toast": {
+      "created": "Workspace {{name}} created",
+      "deleted": "Workspace {{name}} deleted"
+    },
+    "members": "Members"
+  }
+}

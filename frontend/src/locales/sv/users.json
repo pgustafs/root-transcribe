@@ -1,0 +1,66 @@
+{
+  "list": {
+    "title": "Användare",
+    "searchAria": "Sök användare",
+    "searchPlaceholder": "Sök på e-post eller namn",
+    "emptyTitle": "Inga användare ännu",
+    "emptyBody": "Användare visas här efter sin första inloggning med Keycloak.",
+    "loading": "Läser in användare",
+    "tableAria": "Användare",
+    "colEmail": "E-post",
+    "colFullName": "Fullständigt namn",
+    "colRole": "Roll",
+    "colStatus": "Status",
+    "colUserId": "Användar-ID",
+    "colActions": "Åtgärder",
+    "copyUserId": "Kopiera användar-ID för {{email}}",
+    "saveError": "Det gick inte att spara användaren",
+    "roleFilterAria": "Filtrera efter roll",
+    "statusFilterAria": "Filtrera efter status",
+    "allRoles": "Alla roller",
+    "allStatuses": "Alla statusar"
+  },
+  "profile": {
+    "title": "Min profil",
+    "pictureTitle": "Profilbild",
+    "pictureHelp": "Ladda upp en kvadratisk bild (PNG eller JPG, max 256 KB).",
+    "uploadPicture": "Ladda upp bild",
+    "remove": "Ta bort",
+    "uploadAria": "Ladda upp profilbild",
+    "avatarAlt": "Din profilbild",
+    "tooLarge": "Bilden är för stor (max 256 KB).",
+    "readError": "Det gick inte att läsa bildfilen",
+    "avatarUpdateError": "Det gick inte att uppdatera profilbilden",
+    "copyUserId": "Kopiera ditt användar-ID",
+    "description": "Hantera din profilbild och de uppgifter du loggar in med.",
+    "detailsTitle": "Kontouppgifter",
+    "avatarUpdated": "Profilbilden har uppdaterats",
+    "avatarRemoved": "Profilbilden har tagits bort",
+    "voice": {
+      "itemName": "Dina röstavtryck",
+      "deleteTitle": "Ta bort dina röstavtryck?",
+      "deleteConsequence": "Möten kan inte längre identifiera dig automatiskt förrän du registrerar din röst igen.",
+      "deleted": "Röstavtrycken har tagits bort",
+      "deleteError": "Det gick inte att ta bort dina röstavtryck"
+    }
+  },
+  "toast": {
+    "updated": "Användaren har uppdaterats",
+    "deleted": "Användaren {{email}} har tagits bort"
+  },
+  "delete": {
+    "title": "Ta bort användaren?",
+    "consequence": "Hen kan inte längre logga in."
+  },
+  "identity": {
+    "profileHelp": "Hantera namn, e-postadress, lösenord och inloggningssäkerhet i Keycloak.",
+    "manageAccount": "Hantera konto i Keycloak",
+    "manageUsers": "Hantera användare i Keycloak",
+    "openError": "Det gick inte att öppna kontohanteringen. Försök igen.",
+    "listHelp": "Konton och roller hanteras i Keycloak. Användare visas här efter sin första inloggning. Spärra åtkomst här för att blockera den här appen.",
+    "suspend": "Spärra åtkomst",
+    "restore": "Återställ åtkomst",
+    "suspendFor": "Spärra åtkomst för {{email}}",
+    "restoreFor": "Återställ åtkomst för {{email}}"
+  }
+}

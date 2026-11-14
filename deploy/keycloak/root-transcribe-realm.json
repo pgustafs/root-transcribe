@@ -1,0 +1,94 @@
+{
+  "realm": "root-transcribe",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": true,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "roles": {
+    "realm": [
+      {
+        "name": "admin"
+      },
+      {
+        "name": "power_user"
+      },
+      {
+        "name": "feedback_reviewer"
+      },
+      {
+        "name": "user"
+      }
+    ]
+  },
+  "defaultRoles": [
+    "user"
+  ],
+  "clients": [
+    {
+      "clientId": "root-transcribe",
+      "name": "Root Transcribe",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:8095/*",
+        "http://localhost:8000/docs/oauth2-redirect",
+        "http://localhost:8010/docs/oauth2-redirect"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:8095",
+        "http://localhost:8000",
+        "http://localhost:8010"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*##http://localhost:8095/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "application-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "root-transcribe-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "${KEYCLOAK_APP_ADMIN_EMAIL}",
+      "email": "${KEYCLOAK_APP_ADMIN_EMAIL}",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Application",
+      "lastName": "Admin",
+      "realmRoles": [
+        "admin"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_APP_ADMIN_PASSWORD}",
+          "temporary": true
+        }
+      ],
+      "requiredActions": [
+        "UPDATE_PASSWORD"
+      ]
+    }
+  ]
+}

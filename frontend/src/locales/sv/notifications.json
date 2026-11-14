@@ -1,0 +1,14 @@
+{
+  "title": "Aviseringar",
+  "listAria": "Aviseringar",
+  "empty": "Inga aviseringar ännu",
+  "emptyBody": "Omnämnanden från arbetsytekommentarer visas här.",
+  "markAllRead": "Markera alla som lästa",
+  "filter": {
+    "unreadOnly": "Endast olästa",
+    "showingAll": "Alla",
+    "showingUnread": "Olästa"
+  },
+  "markReadError": "Det gick inte att markera aviseringen som läst",
+  "markAllReadError": "Det gick inte att markera aviseringarna som lästa"
+}

@@ -1,0 +1,14 @@
+{
+  "title": "Notifications",
+  "listAria": "Notifications",
+  "empty": "No notifications yet",
+  "emptyBody": "Mentions from workspace comments will show up here.",
+  "markAllRead": "Mark all as read",
+  "filter": {
+    "unreadOnly": "Unread only",
+    "showingAll": "All",
+    "showingUnread": "Unread"
+  },
+  "markReadError": "Could not mark the notification as read",
+  "markAllReadError": "Could not mark notifications as read"
+}
