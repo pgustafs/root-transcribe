@@ -303,6 +303,26 @@ def where_left_out(left_out, hyp_turns: dict[str, list[tuple[float, float]]], ma
     return places
 
 
+def near_turn_edge(entries, hyp_turns: dict[str, list[tuple[float, float]]], mapping: dict[str, str],
+                   margin: float = 0.3) -> tuple[list[str], int]:
+    """Of the words spoken inside a turn the app transcribed for that speaker,
+    those within ``margin`` seconds of the turn's start or end.
+
+    Returns ``(those words, number of words inside such turns)``.
+    """
+    label_of = {ref: hyp for hyp, ref in mapping.items()}
+    near: list[str] = []
+    inside = 0
+    for word, speaker, moment in entries:
+        for start, end in hyp_turns.get(label_of.get(speaker, ""), ()):
+            if start <= moment <= end:
+                inside += 1
+                if min(moment - start, end - moment) <= margin:
+                    near.append(word)
+                break
+    return near, inside
+
+
 def most_common(items: list, count: int = 12) -> list:
     tally: dict = {}
     for item in items:
@@ -607,7 +627,14 @@ def run(args: argparse.Namespace) -> int:
     substitutions, deletions, insertions, deleted_at = align(ref_all, hyp_all)
     wer = (len(substitutions) + len(deletions) + len(insertions)) / len(ref_all)
     cpwer, mapping = cp_wer(ref_by_speaker, hyp_by_speaker)
-    where = where_left_out([ref_timed[i] for i in deleted_at], hyp_turns, mapping)
+    left_out = [ref_timed[i] for i in deleted_at]
+    where = where_left_out(left_out, hyp_turns, mapping)
+    # Are words at turn edges left out more often than words in general?
+    edge_lost, _ = near_turn_edge(left_out, hyp_turns, mapping)
+    edge_all, inside_all = near_turn_edge(ref_timed, hyp_turns, mapping)
+    own_lost = len(where["own_turn"])
+    edge_share = len(edge_lost) / max(own_lost, 1)
+    edge_expected = len(edge_all) / max(inside_all, 1)
     ref_turns = {s: to_turns(w) for s, w in reference.items()}
     speaker_time = der(ref_turns, hyp_turns, duration, collar=0.25)
     strict = der(ref_turns, hyp_turns, duration)
@@ -632,6 +659,8 @@ def run(args: argparse.Namespace) -> int:
         "common_left_out": most_common(deletions),
         "common_added": most_common(insertions),
         "left_out_where": {place: len(found) for place, found in where.items()},
+        "left_out_near_turn_edge": len(edge_lost),
+        "all_words_near_turn_edge_share": round(edge_expected, 4),
         "left_out_words_where": {place: most_common(found) for place, found in where.items()},
         "speaker_mapping": mapping,
         "recording_id": recording["id"],
@@ -664,6 +693,8 @@ Result for {meeting} ({duration / 60:.1f} min, language {args.language})
     {len(where['other_speaker']):4d}  while the app gave the moment to another speaker   {words(where['other_speaker'], 6)}
     {len(where['no_speech']):4d}  where the app detected no speech at all            {words(where['no_speech'], 6)}
     {len(where['own_turn']):4d}  inside a turn the app did transcribe for them      {words(where['own_turn'], 6)}
+          of these, {len(edge_lost)} ({edge_share:.0%}) lie within 0.3 s of the turn's start or end;
+          by chance it would be about {edge_expected:.0%}   {words(edge_lost, 6)}
   Most often added      {words(insertions)}
   Most often replaced   {', '.join(f'{a}→{b}' for (a, b), _ in most_common(substitutions, 8)) or '-'}
 Details saved in {out}/. The recording stays in the “{WORKSPACE_NAME}” workspace.""")
