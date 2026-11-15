@@ -262,7 +262,12 @@ ends, because a clip cut exactly at the turn's edges loses its first and last
 word. A turn of at most 8 s that still comes back empty (a short reply is too
 little audio for the model) is transcribed once more with 2.5 s of context on
 each side; the neighbouring turns' words, already known, are matched away and
-what is left is the turn (`services/turn_transcription.py`).
+what is left is the turn. Last, when the recording was small enough for the
+full-file pass, its plain text is the reference: a run of words it has and no
+turn has is put back at that point of the talk, in an empty turn there or in
+the neighbouring turn that has the time for it (at most five words a second).
+Recordings above the upload cap have no full-file text, so this last check
+does not apply to them (`services/turn_transcription.py`).
 
 The worker streams compressed audio to disk and decodes file-to-file, but
 pyannote loads the complete decoded waveform into memory. Long recordings still

@@ -21,6 +21,12 @@ them are joined: speaker detection often ends a turn in the middle of a
 sentence ("... mellan Stockholm" / "och Sälen med bil"), and the two halves
 transcribe worse apart than together.
 
+Last, when the whole recording was also transcribed in one piece (plain text,
+no timing), that text is the reference for what was said: words it has that no
+turn has were lost in a turn's clip, typically a short second sentence after a
+pause ("... lite trött." / "Hur mår du?"). They are put back where they
+belong in the order of the talk, in the turn that has the time for them.
+
 Pure logic: no audio, no network.
 """
 
@@ -42,6 +48,12 @@ CONTEXT_SECONDS = 2.5
 RESCUE_MAX_SECONDS = 8.0
 #: A turn shorter than this cannot carry a word.
 MIN_TURN_SECONDS = 0.2
+#: Nobody says more words a second than this: a turn already this full cannot
+#: be where missing words were spoken.
+MAX_WORDS_PER_SECOND = 5.0
+#: The whole-file text and the turns must broadly be the same talk before the
+#: one is used to complete the other.
+MIN_AGREEMENT = 0.6
 #: Same-speaker turns with a shorter pause than this are one stretch of speech.
 JOIN_GAP_SECONDS = 0.5
 #: A joined turn stays within one request to the model (its 30 s window), so
@@ -158,3 +170,107 @@ def rescue_text(
     if not run or len(run) > max(4, int(turn_seconds * 6) + 2):
         return ""
     return " ".join(run)
+
+
+def fill_from_full_text(
+    full_text: str,
+    turns: Sequence[SpeakerTurn],
+    texts: Sequence[str],
+) -> tuple[list[str], int]:
+    """Put back words that the whole-file transcript has and no turn has.
+
+    ``texts[i]`` is what was heard in ``turns[i]`` ("" when nothing). The two
+    transcripts are lined up word by word. A run of words that exists only in
+    the whole-file text was said at that point of the talk:
+
+    * inside a turn's text: it goes back into that turn, in place;
+    * between two turns: it goes to an empty turn lying between them if there
+      is one, else to the neighbour that has the time for it (speech takes
+      time: the turn that would stay slowest, and under the limit of
+      ``MAX_WORDS_PER_SECOND``).
+
+    Words that differ between the two transcripts are left alone: only pure
+    additions are taken. Nothing is done when the transcripts do not broadly
+    agree. Returns the completed texts and how many runs were put back.
+    """
+    words: list[list[str]] = [_words(text) for text in texts]
+    flat: list[tuple[str, int]] = [
+        (_key(word), index) for index, turn in enumerate(words) for word in turn
+    ]
+    full = _words(full_text)
+    if not flat or not full:
+        return list(texts), 0
+    matcher = SequenceMatcher(
+        None, [key for key, _ in flat], [_key(w) for w in full], autojunk=False
+    )
+    if matcher.ratio() < MIN_AGREEMENT:
+        return list(texts), 0
+
+    def seconds(index: int) -> float:
+        return max(0.0, turns[index].end - turns[index].start)
+
+    def fits(index: int, extra: int) -> float | None:
+        """Words a second with ``extra`` more words, or None when too many."""
+        length = seconds(index)
+        if length < MIN_TURN_SECONDS:
+            return None
+        rate = (len(words[index]) + extra) / length
+        return rate if rate <= MAX_WORDS_PER_SECOND else None
+
+    def gap_for(i1: int, extra: int) -> int | None:
+        """An empty turn lying between the turns around word position ``i1``."""
+        before = flat[i1 - 1][1] if i1 > 0 else -1
+        after = flat[i1][1] if i1 < len(flat) else len(turns)
+        for index in range(before + 1, after):
+            if not words[index] and fits(index, extra) is not None:
+                return index
+        return None
+
+    added = 0
+    # Back to front, so earlier positions stay valid while words are inserted.
+    for tag, i1, _i2, j1, j2 in reversed(matcher.get_opcodes()):
+        if tag != "insert":
+            continue
+        run = full[j1:j2]
+        # "Hej! Hej!" against one "Hej!": the lining-up cannot know which of
+        # the two is missing. The same words fit one step further on as long
+        # as the next word equals the run's first; look there for an empty
+        # turn before settling for a neighbour.
+        target = gap_for(i1, len(run))
+        shifted, at = run, i1
+        while (
+            target is None
+            and at < len(flat)
+            and at - i1 < 20
+            and flat[at][0] == _key(shifted[0])
+        ):
+            shifted, at = [*shifted[1:], shifted[0]], at + 1
+            target = gap_for(at, len(run))
+        if target is not None:
+            words[target] = list(shifted if at != i1 else run)
+            added += 1
+            continue
+        before = flat[i1 - 1][1] if i1 > 0 else None
+        after = flat[i1][1] if i1 < len(flat) else None
+        if before is not None and before == after:
+            # In the middle of a turn's own text.
+            offset = sum(1 for _word, owner in flat[:i1] if owner == before)
+            if fits(before, len(run)) is not None:
+                words[before][offset:offset] = run
+                added += 1
+            continue
+        # Between two turns: the neighbour that has the time for the words.
+        options = [
+            (rate, index, place)
+            for index, place in ((before, "end"), (after, "start"))
+            if index is not None and (rate := fits(index, len(run))) is not None
+        ]
+        if not options:
+            continue
+        _rate, target, place = min(options)
+        if place == "start":
+            words[target][0:0] = run
+        else:
+            words[target].extend(run)
+        added += 1
+    return [" ".join(turn) for turn in words], added

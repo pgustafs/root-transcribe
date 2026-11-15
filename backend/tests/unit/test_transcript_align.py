@@ -253,3 +253,73 @@ def test_same_speaker_turns_with_almost_no_pause_are_joined() -> None:
     # Order does not matter, and nothing is lost.
     assert join_close_turns(list(reversed(turns))) == join_close_turns(turns)
     assert join_close_turns([]) == []
+
+
+FULL = (
+    " Hej! Hej! Jag heter Peter. Vad heter du? Jag heter Gunilla. Hur mår du "
+    "Gunilla idag? Jag mår bra, men lite trött. Hur mår du? Jag mår också bra. "
+    "Du, jag undrar, vet du hur långt det är mellan Stockholm och Sälen med bil?"
+)
+
+
+def test_words_only_the_whole_file_text_has_are_put_back() -> None:
+    from app.services.turn_transcription import fill_from_full_text
+
+    turns = [
+        SpeakerTurn("A", 1.0, 1.6),
+        SpeakerTurn("B", 1.9, 2.4),
+        SpeakerTurn("A", 3.0, 5.5),
+        SpeakerTurn("B", 6.0, 7.5),
+        SpeakerTurn("A", 8.0, 9.8),
+        SpeakerTurn("B", 10.0, 13.6),  # says two sentences; one was heard
+        SpeakerTurn("A", 14.0, 15.2),
+        SpeakerTurn("A", 15.8, 21.5),
+    ]
+    texts = [
+        "Hej!",
+        "Hej!",
+        "Jag heter Peter. Vad heter du?",
+        "Jag heter Gunilla.",
+        "Hur mår du Gunilla idag?",
+        "Jag mår bra men lite trött.",
+        "Jag mår också bra.",
+        "Du, jag undrar, vet du hur långt det är mellan Stockholm och Sälen med bil?",
+    ]
+    filled, added = fill_from_full_text(FULL, turns, texts)
+    assert added == 1
+    # It goes to the turn that has the time for it: B's 3.6 seconds, not A's
+    # 1.2 seconds that already hold four words.
+    assert filled[5] == "Jag mår bra men lite trött. Hur mår du?"
+    assert filled[6] == "Jag mår också bra."
+    assert filled[:5] == texts[:5] and filled[7] == texts[7]
+    # Nothing is missing: nothing changes (a comma is not a difference).
+    again, added = fill_from_full_text(FULL, turns, filled)
+    assert added == 0 and again == filled
+
+    # A turn that came back empty takes the words said at its place.
+    texts[1] = ""
+    filled, added = fill_from_full_text(FULL, turns, texts)
+    assert added == 2 and filled[1] == "Hej!"
+    # Words lost in the middle of a turn go back in place.
+    texts[1] = "Hej!"
+    texts[7] = "Du, jag undrar, vet du hur långt det är mellan Stockholm med bil?"
+    filled, _ = fill_from_full_text(FULL, turns, texts)
+    assert filled[7].endswith("mellan Stockholm och Sälen med bil?")
+
+
+def test_whole_file_text_is_not_used_when_it_cannot_be_trusted() -> None:
+    from app.services.turn_transcription import fill_from_full_text
+
+    turns = [SpeakerTurn("A", 0.0, 1.0), SpeakerTurn("B", 1.2, 2.2)]
+    texts = ["Jag heter Peter.", "Jag heter Gunilla."]
+    # Another talk altogether (or a garbled answer): nothing is taken from it.
+    other = "blob of thirty seconds that has nothing to do with it at all"
+    assert fill_from_full_text(other, turns, texts) == (texts, 0)
+    assert fill_from_full_text("", turns, texts) == (texts, 0)
+    # A sentence that no turn has the time for (both are full already) was not
+    # said there: it is left out instead of being pinned on somebody.
+    long_extra = (
+        "Jag heter Peter. Och sedan sa någon en väldigt lång mening som inte "
+        "får plats någonstans alls här. Jag heter Gunilla."
+    )
+    assert fill_from_full_text(long_extra, turns, texts) == (texts, 0)

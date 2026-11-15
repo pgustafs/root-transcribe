@@ -582,6 +582,9 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
         language: str | None = None
         duration: float | None = wav_duration
         aligned = None
+        # The whole recording as plain text, when the server gave it: the
+        # reference for what was said if turns are transcribed one by one.
+        full_text = ""
         # The STT server caps upload size (vLLM: 25 MB ⇒ ~13 min of 16 kHz WAV;
         # a 60-min meeting is ~115 MB), so the full-file pass only happens for
         # files under the cap — longer meetings go straight to per-turn slices,
@@ -595,6 +598,7 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
             )
             language = stt.language
             duration = stt.duration or wav_duration
+            full_text = str(getattr(stt, "text", "") or "")
             if stt.has_word_timestamps:
                 # Word timestamps present: one-pass whisperX-style alignment.
                 aligned = align(stt.words, turns)
@@ -705,6 +709,18 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                         "operation": "meeting.per_turn_empty",
                         "empty": empty,
                         "rescued": rescued,
+                        "recording_id": recording_id,
+                    },
+                )
+            # The model sometimes stops after the first sentence of a clip.
+            # The whole-file text has those words: put them back.
+            texts, put_back = turn_stt.fill_from_full_text(full_text, ordered, texts)
+            if put_back:
+                logger.info(
+                    "words missing from speaker turns were put back",
+                    extra={
+                        "operation": "meeting.per_turn_completed",
+                        "runs": put_back,
                         "recording_id": recording_id,
                     },
                 )

@@ -482,6 +482,44 @@ def test_a_sentence_split_by_speaker_detection_is_transcribed_in_one_piece(
     assert calls["stt_calls"].count("turn.wav") == 2
 
 
+def test_a_sentence_the_model_skipped_in_a_turn_comes_back_from_the_full_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model stops after the first sentence of a clip. The whole-file text
+    (plain, no timing) has the second one: it is put back, in the turn of the
+    speaker who had the time to say it."""
+    stt = SimpleNamespace(
+        words=[],
+        text="Hur mår du Gunilla idag? Jag mår bra, men lite trött. Hur mår du? "
+        "Jag mår också bra.",
+        language="sv",
+        duration=20.0,
+        has_word_timestamps=False,
+    )
+    turns = [
+        SpeakerTurn("SPEAKER_00", 8.0, 9.8),
+        SpeakerTurn("SPEAKER_01", 10.0, 12.0),
+        SpeakerTurn("SPEAKER_01", 12.3, 13.6),  # joined with the turn before
+        SpeakerTurn("SPEAKER_00", 14.0, 15.2),
+    ]
+    calls = _wire_pipeline(monkeypatch, stt_result=stt, turns=turns)
+    calls["heard"] = {
+        "7.8-9.9": "Hur mår du Gunilla idag?",
+        "9.9-13.8": "Jag mår bra men lite trött.",
+        "13.8-15.4": "Jag mår också bra.",
+    }
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    assert [(s["speaker_label"], s["text"]) for s in calls["segments"]] == [
+        ("SPEAKER_00", "Hur mår du Gunilla idag?"),
+        ("SPEAKER_01", "Jag mår bra men lite trött. Hur mår du?"),
+        ("SPEAKER_00", "Jag mår också bra."),
+    ]
+    # No extra request: the whole-file text was already there.
+    assert calls["stt_calls"] == ["audio.wav", "turn.wav", "turn.wav", "turn.wav"]
+
+
 def test_short_turns_that_come_back_empty_are_heard_again_with_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
