@@ -16,7 +16,7 @@ Url = Annotated[
 ]
 StudyLanguage = Literal["auto", "en", "sv"]
 StudyMode = Literal["until_stopped", "last_15s"]
-NoteTag = Literal["important", "unclear"]
+NoteTag = Literal["important", "unclear", "question"]
 
 
 class NotebookCreate(BaseModel):
@@ -48,6 +48,8 @@ class SessionCreate(BaseModel):
     mode: StudyMode = "until_stopped"
     # Let the language model work on the notes (when one is configured).
     enrich: bool = True
+    # Questions may be researched on the web (only the question is sent out).
+    research_web: bool = False
     started_at: datetime | None = None
 
 
@@ -64,6 +66,7 @@ class SessionPublic(BaseModel):
     language: str
     mode: str
     enrich: bool = True
+    research_web: bool = False
     started_at: datetime
 
 
@@ -93,6 +96,12 @@ class NotePublic(BaseModel):
     explanation: str | None = None
     enrich_status: str = "none"
     enrich_error: str | None = None
+    question: str | None = None
+    answer_short: str | None = None
+    answer: str | None = None
+    answer_sources: list[dict] | None = None
+    answer_status: str = "none"
+    answer_error: str | None = None
     end_reason: str | None
     source_time_url: str | None
     created_at: datetime
@@ -140,3 +149,5 @@ class NoteContext(BaseModel):
 class StudyFeatures(BaseModel):
     # A language model is configured: notes can be worked on.
     enrich: bool
+    # Web search is set up: questions can be researched on the web.
+    web_research: bool = False

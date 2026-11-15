@@ -30,8 +30,24 @@ export type StudyNoteStatus =
   | "failed"
   | "screenshot_only";
 
-export type NoteTag = "important" | "unclear";
-export const NOTE_TAGS: NoteTag[] = ["important", "unclear"];
+export type NoteTag = "important" | "unclear" | "question";
+export const NOTE_TAGS: NoteTag[] = ["important", "unclear", "question"];
+export type AnswerSource =
+  | {
+      kind: "recording";
+      label: string;
+      title: string;
+      recording_id: string;
+      start_ms: number;
+    }
+  | {
+      kind: "note";
+      label: string;
+      title: string;
+      notebook_id: string;
+      note_id: string;
+    }
+  | { kind: "web"; title: string; url: string };
 export type NoteTerm = { term: string; definition: string };
 export type EnrichStatus =
   "none" | "pending" | "processing" | "ready" | "failed";
@@ -79,6 +95,14 @@ export type StudyNote = {
   explanation: string | null;
   enrich_status: EnrichStatus;
   enrich_error: string | null;
+  /** A note marked "question": what was asked, and a suggested answer. */
+  question: string | null;
+  answer_short: string | null;
+  answer: string | null;
+  answer_sources: AnswerSource[] | null;
+  answer_status: EnrichStatus;
+  /** "no_speech", "no_question" or a readable reason. */
+  answer_error: string | null;
   end_reason: string | null;
   source_time_url: string | null;
   created_at: string;
@@ -162,6 +186,7 @@ export async function putSession(
     language: string;
     mode: string;
     enrich?: boolean;
+    research_web?: boolean;
     started_at: string;
   },
 ): Promise<StudySession> {
@@ -291,11 +316,32 @@ export async function getNoteContext(
   return data;
 }
 
-export async function getFeatures(
-  workspaceId: string,
-): Promise<{ enrich: boolean }> {
-  const { data } = await apiClient.get<{ enrich: boolean }>(
+export type StudyFeatures = { enrich: boolean; web_research: boolean };
+
+export async function getFeatures(workspaceId: string): Promise<StudyFeatures> {
+  const { data } = await apiClient.get<StudyFeatures>(
     `${base(workspaceId)}/features`,
+  );
+  return data;
+}
+
+export async function getNote(
+  workspaceId: string,
+  noteId: string,
+): Promise<StudyNote> {
+  const { data } = await apiClient.get<StudyNote>(
+    `${base(workspaceId)}/notes/${noteId}`,
+  );
+  return data;
+}
+
+/** Look for an answer to a note's question (again). */
+export async function answerNote(
+  workspaceId: string,
+  noteId: string,
+): Promise<StudyNote> {
+  const { data } = await apiClient.post<StudyNote>(
+    `${base(workspaceId)}/notes/${noteId}/answer`,
   );
   return data;
 }

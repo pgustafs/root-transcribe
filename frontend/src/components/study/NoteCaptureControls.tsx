@@ -1,4 +1,8 @@
-import { CircleHelpIcon, StarIcon } from "lucide-react";
+import {
+  CircleHelpIcon,
+  MessageCircleQuestionIcon,
+  StarIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -15,6 +19,8 @@ export type NoteCaptureActions = {
   onMark: (tag: NoteTag, thought?: string) => void;
   onThought: (thought: string) => void;
   onKeepOffer: (thought?: string) => void;
+  /** Somebody just asked a question: keep the last minute and answer it. */
+  onQuestion: (thought?: string) => void;
 };
 
 type Props = {
@@ -107,6 +113,17 @@ export function NoteCaptureControls({
           );
         })}
       </div>
+      <Button
+        onClick={() => withThought(actions.onQuestion)}
+        disabled={!canCapture}
+        variant="outline"
+        size="sm"
+        className={floating ? "w-full" : undefined}
+        title={t("question.help")}
+      >
+        <MessageCircleQuestionIcon data-icon="inline-start" />
+        {t("question.button")}
+      </Button>
       <Input
         value={thought}
         disabled={!usable}

@@ -32,6 +32,8 @@ export type StoredStudySession = {
   enrich?: boolean;
   /** Offer to keep a slide when it changes (absent = no). */
   offerSlides?: boolean;
+  /** Questions may be researched on the web (absent = no). */
+  researchWeb?: boolean;
   /** The recorder's local session this belongs to (linked at upload). */
   localRecordingId: string;
   /** Set when the meeting recording exists on the server. */

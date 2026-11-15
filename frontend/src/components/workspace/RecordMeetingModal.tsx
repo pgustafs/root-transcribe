@@ -164,6 +164,8 @@ export function RecordMeetingModal({
             mode: studyChoice.mode,
             enrich: studyChoice.enrich && Boolean(features.data?.enrich),
             offerSlides: studyChoice.offerSlides,
+            researchWeb:
+              studyChoice.researchWeb && Boolean(features.data?.web_research),
           };
         } catch {
           setStudyProblem(true);
@@ -344,6 +346,26 @@ export function RecordMeetingModal({
                   </Field>
                   <FieldDescription id="study-offer-slides-help">
                     {t("study:setup.offerSlidesHelp")}
+                  </FieldDescription>
+                </Field>
+              )}
+              {takeStudyNotes && features.data?.web_research && (
+                <Field>
+                  <Field orientation="horizontal">
+                    <Switch
+                      id="study-research-web"
+                      checked={studyChoice.researchWeb}
+                      onCheckedChange={(researchWeb) =>
+                        setStudyChoice({ ...studyChoice, researchWeb })
+                      }
+                      aria-describedby="study-research-web-help"
+                    />
+                    <FieldLabel htmlFor="study-research-web">
+                      {t("study:setup.researchWeb")}
+                    </FieldLabel>
+                  </Field>
+                  <FieldDescription id="study-research-web-help">
+                    {t("study:setup.researchWebHelp")}
                   </FieldDescription>
                 </Field>
               )}

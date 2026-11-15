@@ -15,6 +15,8 @@ export type StudyChoice = {
   enrich: boolean;
   /** Offer to keep a slide when it changes. */
   offerSlides: boolean;
+  /** Research marked questions on the web (only the question is sent). */
+  researchWeb: boolean;
 };
 
 export const EMPTY_STUDY_CHOICE: StudyChoice = {
@@ -24,7 +26,11 @@ export const EMPTY_STUDY_CHOICE: StudyChoice = {
   mode: "until_stopped",
   enrich: true,
   offerSlides: true,
+  researchWeb: false,
 };
+
+/** The floating Take note window's size (without an answer card). */
+export const FLOAT_SIZE = { width: 340, height: 290 };
 
 export function sourceUrlProblem(choice: StudyChoice): boolean {
   return (

@@ -13,6 +13,8 @@
 
 export const NOTE_SAMPLE_RATE = 16000;
 export const LOOKBACK_SECONDS = 15;
+/** A question is heard further back: a minute of talk. */
+export const QUESTION_LOOKBACK_SECONDS = 60;
 const CHUNK_SECONDS = 5;
 
 export type NoteChunkSink = (index: number, samples: Float32Array) => void;
@@ -43,12 +45,17 @@ export class TabAudioBuffer {
   private readonly maxSamples: number;
   private readonly chunkSamples: number;
 
+  private readonly keepSamples: number;
+
   constructor(
     readonly sampleRate = NOTE_SAMPLE_RATE,
     lookbackSeconds = LOOKBACK_SECONDS,
     chunkSeconds = CHUNK_SECONDS,
+    /** How far back anything can be asked for (a question: one minute). */
+    keepSeconds = Math.max(lookbackSeconds, QUESTION_LOOKBACK_SECONDS),
   ) {
     this.maxSamples = Math.round(sampleRate * lookbackSeconds);
+    this.keepSamples = Math.round(sampleRate * keepSeconds);
     this.chunkSamples = Math.round(sampleRate * chunkSeconds);
   }
 
@@ -60,7 +67,7 @@ export class TabAudioBuffer {
     this.ringSamples += block.length;
     while (
       this.ring.length > 1 &&
-      this.ringSamples - this.ring[0].length >= this.maxSamples
+      this.ringSamples - this.ring[0].length >= this.keepSamples
     ) {
       this.ringSamples -= this.ring[0].length;
       this.ring.shift();
@@ -88,12 +95,15 @@ export class TabAudioBuffer {
     return this.open !== null;
   }
 
-  /** The newest samples, at most 15 seconds. */
-  lookback(): Float32Array {
+  /** The newest samples: at most 15 seconds, or `seconds` when given (never
+   * more than is kept). */
+  lookback(seconds?: number): Float32Array {
+    const wanted =
+      seconds === undefined
+        ? this.maxSamples
+        : Math.min(this.keepSamples, Math.round(this.sampleRate * seconds));
     const all = concat(this.ring, this.ringSamples);
-    return all.length > this.maxSamples
-      ? all.slice(all.length - this.maxSamples)
-      : all;
+    return all.length > wanted ? all.slice(all.length - wanted) : all;
   }
 
   /**

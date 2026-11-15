@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     AGENT_RUNNER_URL: str = "http://localhost:8011"
     # Longer transcripts are processed in parts and merged (about 4 characters
     # per token; leave room for the agent's own prompt and the answer).
+    # Questions marked in a notebook can be researched on the web by the agent,
+    # through the search MCP server in the pod (Tavily). Off unless a key is set
+    # at deployment; each recording session must also ask for it.
+    WEB_SEARCH_ENABLED: bool = False
     NOTES_MAX_INPUT_CHARS: int = 48000
     NOTES_TIMEOUT_SECONDS: int = 900
     DIARIZATION_MODEL: str = "pyannote/speaker-diarization-community-1"

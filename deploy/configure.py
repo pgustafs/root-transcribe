@@ -28,6 +28,8 @@ DEFAULTS = {
     "LLM_BASE_URL": "",
     "LLM_MODEL": "",
     "LLM_API_KEY": "",
+    # Optional: web research for questions marked in a notebook (needs the LLM).
+    "TAVILY_API_KEY": "",
     "AUDIO_S3_BUCKET": "meeting-audio",
     "AUDIO_S3_REGION": "us-east-1",
     "HF_TOKEN": "",
@@ -65,6 +67,19 @@ ARM64_REPLACEMENTS = (
 
 AGENT_BEGIN = "  # agent-runner:begin"
 AGENT_END = "  # agent-runner:end\n"
+
+
+SEARCH_BEGIN = "  # search-mcp:begin"
+SEARCH_END = "  # search-mcp:end\n"
+SEARCH_MCP_URL = "http://127.0.0.1:8012/mcp"
+
+
+def without_search_mcp(manifest: str) -> str:
+    """Drop the search MCP container: no Tavily key, no web research."""
+    if manifest.count(SEARCH_BEGIN) != 1 or manifest.count(SEARCH_END) != 1:
+        raise ValueError("Cannot find the search-mcp block in the manifest")
+    start = manifest.index(SEARCH_BEGIN)
+    return manifest[:start] + manifest[manifest.index(SEARCH_END) + len(SEARCH_END) :]
 
 
 def without_agent_runner(manifest: str) -> str:
@@ -110,7 +125,9 @@ def list_stt_models(url: str, api_key: str = "", timeout: float = 10) -> list[st
     return [e["id"] for e in entries if isinstance(e, dict) and e.get("id")]
 
 
-def detect_stt_model(url: str, api_key: str = "", *, llm: bool = False) -> tuple[str, str]:
+def detect_stt_model(
+    url: str, api_key: str = "", *, llm: bool = False
+) -> tuple[str, str]:
     """Return (base URL, model) by asking the server which models it serves.
 
     For speech-to-text a single Whisper model is preferred; for the LLM
@@ -289,6 +306,7 @@ def resource(kind: str, name: str, data: dict[str, str]) -> dict:
 def render(
     values: dict[str, str], credentials: dict[str, str], *, arch: str = ""
 ) -> str:
+    web_search = bool(values["LLM_BASE_URL"] and values["TAVILY_API_KEY"])
     config = {
         "PROJECT_NAME": "Root Transcribe",
         "ENVIRONMENT": "production",
@@ -301,6 +319,9 @@ def render(
         "REDIS_URL": "redis://localhost:6379/0",
         "AUDIO_S3_ENDPOINT_URL": "http://127.0.0.1:8333",
         "WAIT_FOR_AUDIO_STORE": "true",
+        # Web research needs both the LLM (the agent) and a Tavily key.
+        "WEB_SEARCH_ENABLED": "true" if web_search else "false",
+        "SEARCH_MCP_URL": SEARCH_MCP_URL if web_search else "",
         **{
             key: values[key]
             for key in (
@@ -328,6 +349,8 @@ def render(
         },
     }
     manifest = (DEPLOY / "root-transcribe.yaml").read_text()
+    if not web_search:
+        manifest = without_search_mcp(manifest)
     if not values["LLM_BASE_URL"]:
         manifest = without_agent_runner(manifest)
     realm = json.loads((DEPLOY / "keycloak/root-transcribe-realm.json").read_text())
@@ -342,6 +365,18 @@ def render(
             "Secret",
             "transcribe-keycloak-secret",
             {k: credentials[k] for k in GENERATED_SECRETS if k.startswith("KEYCLOAK_")},
+        ),
+        # Its own secret: only the search container may read the Tavily key.
+        *(
+            [
+                resource(
+                    "Secret",
+                    "transcribe-search-secret",
+                    {"TAVILY_API_KEY": values["TAVILY_API_KEY"]},
+                )
+            ]
+            if web_search
+            else []
         ),
         resource(
             "ConfigMap",
@@ -429,8 +464,11 @@ def main() -> int:
                 **(overrides or {}),
                 "LLM_BASE_URL": llm_url,
                 "LLM_API_KEY": llm_key,
+                "TAVILY_API_KEY": os.environ.get("TAVILY_API_KEY", ""),
                 **({"LLM_MODEL": llm_model} if llm_model else {}),
             }
+            if os.environ.get("TAVILY_API_KEY"):
+                print("Web research for notebook questions: on (Tavily)")
         values = read_settings(
             args.env, allow_empty_hf_token=args.prepare, overrides=overrides
         )

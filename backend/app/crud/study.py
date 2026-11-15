@@ -364,3 +364,49 @@ def claim_enrich_sync(session: Session, *, note_id: uuid.UUID) -> bool:
     )
     session.commit()
     return bool(result.rowcount)
+
+
+# --- a marked question and its answer -------------------------------------------
+
+
+def answer_wanted(note: StudyNote) -> bool:
+    """The note is marked as a question and a language model is configured."""
+    return "question" in (note.tags or []) and bool(settings.LLM_BASE_URL.strip())
+
+
+def _answer_outbox(note: StudyNote) -> dict:
+    note.answer_count = (note.answer_count or 0) + 1
+    note.answer_status = "pending"
+    note.answer_error = None
+    return {
+        "task_name": "tasks.answer_study_question",
+        "queue": "celery",
+        "payload": {"note_id": str(note.id)},
+        "dedupe_key": f"study-note:{note.id}:answer:{note.answer_count}",
+    }
+
+
+async def queue_answer(
+    session: AsyncSession, note: StudyNote, *, headers: dict | None = None
+):
+    from app.crud import task_outbox as task_outbox_crud
+
+    return await task_outbox_crud.enqueue(
+        session, headers=headers, **_answer_outbox(note)
+    )
+
+
+def queue_answer_sync(session: Session, note: StudyNote):
+    from app.crud import task_outbox as task_outbox_crud
+
+    return task_outbox_crud.enqueue_sync(session, **_answer_outbox(note))
+
+
+def claim_answer_sync(session: Session, *, note_id: uuid.UUID) -> bool:
+    result = session.execute(
+        sa_update(StudyNote)
+        .where(StudyNote.id == note_id, StudyNote.answer_status == "pending")
+        .values(answer_status="processing")
+    )
+    session.commit()
+    return bool(result.rowcount)

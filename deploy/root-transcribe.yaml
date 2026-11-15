@@ -430,12 +430,41 @@ spec:
         secretKeyRef:
           name: transcribe-app-secret
           key: LLM_API_KEY
+    # Where the web_search tool lives (empty = no web research).
+    - name: SEARCH_MCP_URL
+      valueFrom:
+        configMapKeyRef:
+          name: transcribe-app-config
+          key: SEARCH_MCP_URL
     resources:
       requests:
         memory: 1Gi
       limits:
         memory: 3Gi
   # agent-runner:end
+  # search-mcp:begin (configure.py removes this block when no Tavily key is set)
+  # Web search for questions marked in a notebook: an MCP server with one tool,
+  # web_search (Tavily). Reached by the agent runner on the pod's loopback
+  # (port 8012, not published). It is the only container that holds the Tavily
+  # key and the only one that talks to the search service; it gets nothing else.
+  - name: search-mcp
+    image: localhost/root-transcribe-agent:latest
+    imagePullPolicy: Never
+    command:
+    - python
+    - search_mcp.py
+    env:
+    - name: TAVILY_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: transcribe-search-secret
+          key: TAVILY_API_KEY
+    resources:
+      requests:
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  # search-mcp:end
   # Browser entry point: serves the UI and proxies /api to the API.
   - name: frontend
     image: localhost/root-transcribe-frontend:latest

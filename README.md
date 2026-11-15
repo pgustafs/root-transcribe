@@ -831,6 +831,43 @@ after the note, taken from the transcript of the full recording once that has
 been uploaded and transcribed. The notebook can be searched (titles,
 transcripts, slide text, thoughts, terms) and filtered by mark.
 
+### Question: an answer while the meeting goes on
+
+When somebody asks a question in a web meeting, press **Question** (in the
+floating window or the recording bar). It needs the text model.
+
+1. The last **minute** of the tab's audio is kept as a note of its own (an
+   open note is not affected), and transcribed.
+2. The model picks the question out of what was said and shows it back, with a
+   first short answer when it is sure of one. This appears in the floating
+   window within some seconds.
+3. The **workspace is searched**: transcripts of earlier recordings you may
+   read (recordings marked *restricted* are left out) and your own notes.
+4. With *Research questions on the web* switched on for this recording, an
+   agent **researches the question on the web**.
+5. The answer is rewritten from what was found. The window shows two or three
+   sentences to say aloud; the notebook has the full answer and its sources:
+   links to the moment in an earlier recording, to your notes, and to the web
+   pages the search returned.
+
+Every answer is labelled a suggestion. Marking an existing note as *Question*
+in its menu, or **Try again**, runs the same steps.
+
+**Web research setup.** It is off unless a [Tavily](https://tavily.com) key is
+given at deployment (`TAVILY_API_KEY` in `deploy/settings.env`, or in the
+environment for `deploy/mac.sh`, together with the LLM endpoint):
+
+```sh
+TAVILY_API_KEY=tvly-... ./deploy/mac.sh http://localhost:8000/v1 http://localhost:8001/v1
+```
+
+That adds a `search-mcp` container to the pod: an MCP server with one tool,
+`web_search`, which the CUGA agent in the agent runner calls. What leaves the
+installation is the search queries the agent writes from the **question**; the
+agent is never given the recording, the transcript or your notes. The key is
+held by that container only. Each recording still has to switch web research
+on, and the default is off.
+
 Ideas that are not built yet are in [NOTEBOOK_IDEAS.md](NOTEBOOK_IDEAS.md).
 
 ## Measure transcription quality

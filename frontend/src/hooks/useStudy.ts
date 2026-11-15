@@ -54,7 +54,9 @@ export function useNotebook(
           note.status === "pending" ||
           note.status === "processing" ||
           note.enrich_status === "pending" ||
-          note.enrich_status === "processing",
+          note.enrich_status === "processing" ||
+          note.answer_status === "pending" ||
+          note.answer_status === "processing",
       );
       return working || live ? 2000 : false;
     },
@@ -129,6 +131,12 @@ export function useSetNoteTags(workspaceId: string, notebookId: string) {
   );
 }
 
+export function useAnswerNote(workspaceId: string, notebookId: string) {
+  return useNoteMutation(workspaceId, notebookId, (noteId: string) =>
+    studyApi.answerNote(workspaceId, noteId),
+  );
+}
+
 export function useEnrichNote(workspaceId: string, notebookId: string) {
   return useNoteMutation(workspaceId, notebookId, (noteId: string) =>
     studyApi.enrichNote(workspaceId, noteId),
@@ -194,5 +202,38 @@ export function useDeleteNotebook(workspaceId: string) {
       studyApi.deleteNotebook(workspaceId, notebookId),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: studyKeys.notebooks(workspaceId) }),
+  });
+}
+
+/** Is the answer still being worked on? */
+export function answerWorking(note: studyApi.StudyNote | undefined): boolean {
+  if (!note) return true;
+  if (note.answer_status === "pending" || note.answer_status === "processing")
+    return true;
+  // The transcript comes first; the answer is queued when it is ready.
+  return (
+    note.answer_status === "none" &&
+    (note.status === "pending" || note.status === "processing")
+  );
+}
+
+/**
+ * The note of a question that was just marked, polled until its answer is
+ * final. The note does not exist on the server until it has been uploaded, so
+ * "not found" simply means "not yet".
+ */
+export function useQuestionNote(
+  workspaceId: string | null,
+  noteId: string | null,
+) {
+  return useQuery({
+    queryKey: ["study", workspaceId, "question", noteId] as const,
+    queryFn: () => studyApi.getNote(workspaceId as string, noteId as string),
+    enabled: Boolean(workspaceId) && Boolean(noteId),
+    retry: false,
+    refetchInterval: (query) =>
+      answerWorking(query.state.data as studyApi.StudyNote | undefined)
+        ? 2000
+        : false,
   });
 }

@@ -21,7 +21,7 @@ RECEIPT = "│ tokens: 10 in / 5 out (15) │\n│ llm calls: 2   tool calls: 0 
 def use_agent(monkeypatch, invoke):
     built: list[str] = []
 
-    def build(instructions: str):
+    def build(instructions: str, tools=None):
         built.append(instructions)
         return SimpleNamespace(invoke=invoke)
 
@@ -34,6 +34,7 @@ def test_health_reports_the_model_and_its_context_window(monkeypatch):
     assert client.get("/health").json() == {
         "status": "ok",
         "model": "test-model",
+        "web_search": False,
         "context_tokens": 8192,
     }
 
@@ -140,3 +141,65 @@ def test_chat_reports_a_model_error_instead_of_raising(monkeypatch):
     monkeypatch.setattr(main, "_build_model", lambda: Refuses())
     body = client.post("/chat", json={"instructions": "x", "image_base64": "QUJD"}).json()
     assert body["answer"] == "" and "does not support image input" in body["error"]
+
+
+def test_research_gives_the_agent_one_search_tool_and_reports_its_pages(monkeypatch):
+    monkeypatch.setattr(main, "SEARCH_MCP_URL", "http://mcp/mcp")
+    queries: list[str] = []
+
+    async def search(query: str):
+        queries.append(query)
+        return [
+            {"title": "Index scans", "url": "https://example.org/a", "content": "Reads matching rows."},
+            {"title": "Again", "url": "https://example.org/a", "content": "Same page."},
+        ]
+
+    monkeypatch.setattr(main, "_search", search)
+    given = {}
+
+    def build(instructions: str, tools=None):
+        given["instructions"], given["tools"] = instructions, tools
+
+        async def invoke(question: str):
+            # The agent searches more often than it is allowed to.
+            texts = [await tools[0].ainvoke({"query": f"{question} {n}"}) for n in range(6)]
+            given["texts"] = texts
+            return SimpleNamespace(answer="An index scan reads only matching rows.", error=None)
+
+        return SimpleNamespace(invoke=invoke)
+
+    monkeypatch.setattr(main, "_build_agent", build)
+    body = client.post("/research", json={"question": "What is an index scan?"}).json()
+    assert body["answer"].startswith("An index scan") and body["error"] is None
+    assert given["tools"][0].name == "web_search"
+    assert "web_search" in given["instructions"]
+    # Four searches at most; the page is listed once, as the tool returned it.
+    assert len(queries) == main.MAX_SEARCHES
+    assert "No more searches" in given["texts"][-1]
+    assert body["sources"] == [{"title": "Index scans", "url": "https://example.org/a"}]
+    assert "https://example.org/a" in given["texts"][0]
+
+
+def test_research_is_off_without_a_search_server_and_survives_a_failed_search(monkeypatch):
+    monkeypatch.setattr(main, "SEARCH_MCP_URL", "")
+    body = client.post("/research", json={"question": "What is an index scan?"}).json()
+    assert body["error"] == "Web search is not configured."
+    assert client.get("/health").json()["web_search"] is False
+
+    monkeypatch.setattr(main, "SEARCH_MCP_URL", "http://mcp/mcp")
+
+    async def broken(query: str):
+        raise RuntimeError("The search service answered HTTP 401.")
+
+    monkeypatch.setattr(main, "_search", broken)
+
+    def build(instructions: str, tools=None):
+        async def invoke(question: str):
+            told = await tools[0].ainvoke({"query": question})
+            return SimpleNamespace(answer=f"I could not search. {told}", error=None)
+
+        return SimpleNamespace(invoke=invoke)
+
+    monkeypatch.setattr(main, "_build_agent", build)
+    body = client.post("/research", json={"question": "What is an index scan?"}).json()
+    assert "HTTP 401" in body["answer"] and body["sources"] == []

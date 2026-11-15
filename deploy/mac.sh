@@ -10,7 +10,8 @@
 # the saved `hf auth login`, the model names are asked from the endpoints, and
 # passwords are generated once into deploy/secrets.local.json.
 # Optional environment: STT_API_KEY, STT_MODEL, LLM_API_KEY, LLM_MODEL (a model
-# name skips detection), REBUILD=1.
+# name skips detection), REBUILD=1, and TAVILY_API_KEY (with an LLM endpoint:
+# lets the agent research notebook questions on the web).
 # Stop:  ./deploy/start.sh stop
 set -eu
 
@@ -112,6 +113,7 @@ set -- --stt-url "$stt_url" --arch arm64
 podman run --rm --user 0 --security-opt label=disable --entrypoint python3 \
   -e HF_TOKEN -e STT_API_KEY="${STT_API_KEY:-}" -e STT_MODEL="${STT_MODEL:-}" \
   -e LLM_API_KEY="${LLM_API_KEY:-}" -e LLM_MODEL="${LLM_MODEL:-}" \
+  -e TAVILY_API_KEY="${TAVILY_API_KEY:-}" \
   -v "$repo_dir/deploy:/deploy" localhost/root-transcribe:latest \
   /deploy/configure.py "$@" ||
   {

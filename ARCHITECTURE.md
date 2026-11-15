@@ -161,6 +161,27 @@ transcript of a short piece of the tab's audio.
   columns on `study_note` (`title`, `clean_text`, `slide_text`, `terms`,
   `explanation`, `enrich_status`); `text` is never changed. Off when
   `LLM_BASE_URL` is empty or the session was started with `enrich=false`.
+- **Questions.** A note marked `question` is captured with a 60-second
+  look-back. `tasks.answer_study_question` runs after its transcription:
+  (1) `POST /chat` extracts the question, search words and a first answer,
+  stored at once; (2) `services/study_answer.py` searches the workspace with
+  those words: segments of the display revision of recordings the notebook's
+  owner may read (role and grants are evaluated in the worker; `restricted`
+  recordings are excluded) and the owner's own notes; (3) if the session has
+  `research_web` and `WEB_SEARCH_ENABLED` is set, the runner's
+  `POST /research` runs a CUGA agent with one tool, `web_search`, and is given
+  the question only; (4) `POST /chat` writes the final answer from the
+  findings. Sources are stored as data (`answer_sources`): workspace excerpts
+  from the search, web pages as returned by the tool, not parsed from the
+  model's text. The recorder polls `GET …/study/notes/{id}` for the answer.
+- **Search MCP server.** `agent-runner/search_mcp.py` (FastMCP, streamable
+  HTTP on the pod's loopback, port 8012) wraps Tavily's search API behind
+  `web_search`. It runs from the agent image as its own container
+  (`search-mcp`), holds the Tavily key in its own secret, and is deployed only
+  when both an LLM endpoint and a key are configured. At most four searches
+  are allowed per question.
+  Adding a second MCP server (for example RAG over documents) is described
+  in `agent-runner/README.md`.
 - **Wider context.** `GET …/study/notes/{id}/context?seconds=N` returns the
   segments of the linked recording's display revision around the note; it
   needs the `view_transcript` capability.
@@ -401,8 +422,8 @@ Browser IndexedDB contains local recovery copies, independently of server storag
 Alembic migrations are explicit and ordered. `0001_transcription` initializes
 an empty application database; `0002_recording_language` and
 `0003_meeting_notes`, `0004_speaker_names`, `0005_study_notes`,
-`0006_drop_hotkey_credential`, `0007_study_note_comment` and
-`0008_study_note_enrichment` upgrade it (`0003` also inserts
+`0006_drop_hotkey_credential`, `0007_study_note_comment`,
+`0008_study_note_enrichment` and `0009_study_question_answers` upgrade it (`0003` also inserts
 the built-in note agents). Run
 `alembic upgrade head` for both new installations and upgrades. Do not edit an
 applied migration or change version markers to bypass an upgrade. Schema parity

@@ -20,7 +20,9 @@
     "offerSlides": "Erbjud att spara en bild när den byts",
     "offerSlidesHelp": "När en ny bild visas kan du i 20 sekunder fortfarande spara den förra som en anteckning, med det som sades före bytet.",
     "enrich": "Förbättra anteckningar med AI",
-    "enrichHelp": "Lägger till en rubrik, en städad version av texten, nyckelbegrepp och texten på bilden. Bilden och texten i varje anteckning skickas till den här installationens språkmodell."
+    "enrichHelp": "Lägger till en rubrik, en städad version av texten, nyckelbegrepp och texten på bilden. Bilden och texten i varje anteckning skickas till den här installationens språkmodell.",
+    "researchWeb": "Undersök frågor på webben",
+    "researchWebHelp": "När du trycker på Fråga skickas själva frågan (aldrig inspelningen eller transkriptet) till söktjänsten Tavily. Svaret listar sidorna som användes."
   },
   "crop": {
     "title": "Välj vad som ska sparas",
@@ -83,7 +85,8 @@
   "marks": {
     "label": "Märk anteckningen",
     "important": "Viktigt",
-    "unclear": "Förstår inte"
+    "unclear": "Förstår inte",
+    "question": "Fråga"
   },
   "thought": {
     "label": "En tanke till anteckningen",
@@ -93,6 +96,29 @@
     "keep": "Spara förra bilden",
     "line": "Bilden byttes",
     "announce": "Bilden byttes. Du kan spara den förra bilden som en anteckning."
+  },
+  "question": {
+    "button": "Fråga",
+    "help": "Någon ställde just en fråga: spara den senaste minuten och föreslå ett svar"
+  },
+  "answer": {
+    "title": "Föreslaget svar",
+    "dismiss": "Stäng svaret",
+    "listening": "Lyssnar tillbaka på den senaste minuten …",
+    "finding": "Letar efter frågan …",
+    "researching": "Söker efter mer …",
+    "noQuestion": "Ingen fråga hördes under den senaste minuten.",
+    "noSpeech": "Inget sades under den senaste minuten.",
+    "failed": "Inget svar kunde hittas.",
+    "unavailable": "Svar kräver en språkmodell, och den här installationen har ingen.",
+    "sources": "Källor",
+    "sourceRecording": "{{label}} · {{title}} vid {{time}}",
+    "sourceNote": "{{label}} · Anteckning: {{title}}",
+    "check": "Ett förslag. Kontrollera det innan du litar på det.",
+    "moreInNotebook": "Ett förslag. Källor och hela svaret finns i anteckningsboken.",
+    "question": "Fråga",
+    "suggested": "Föreslaget svar",
+    "again": "Försök igen"
   },
   "page": {
     "notebooks": "Anteckningsböcker",

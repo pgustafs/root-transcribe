@@ -39,6 +39,9 @@ import { useNavigate } from "react-router-dom";
 import { ChangeSourceDialog } from "@/components/study/ChangeSourceDialog";
 import { useFloatingWindow } from "@/hooks/useFloatingWindow";
 import { FloatingNotePanel } from "@/components/study/FloatingNotePanel";
+import { QuestionAnswerCard } from "@/components/study/QuestionAnswer";
+import { useQuestionNote } from "@/hooks/useStudy";
+import { FLOAT_SIZE } from "@/lib/study/studyChoice";
 import type { NoteCaptureActions } from "@/components/study/NoteCaptureControls";
 import type { Crop } from "@/lib/study/frame";
 import {
@@ -108,6 +111,8 @@ export type StudyTarget = {
   enrich?: boolean;
   /** Offer to keep a slide when it changes. */
   offerSlides?: boolean;
+  /** Questions may be researched on the web. */
+  researchWeb?: boolean;
 };
 
 type RecordingContextValue = {
@@ -222,15 +227,27 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
   const studyController = studyRef.current;
   const floating = useFloatingWindow({
     title: t("study:dock.takeNote"),
-    width: 340,
-    height: 250,
+    ...FLOAT_SIZE,
   });
+  // The question that was marked last: its answer is shown where the
+  // learner is looking (the floating window, and the recording bar).
+  const questionNote = useQuestionNote(study.workspaceId, study.questionNoteId);
+  const answerCard = (compact: boolean) =>
+    study.questionNoteId && study.workspaceId ? (
+      <QuestionAnswerCard
+        workspaceId={study.workspaceId}
+        note={questionNote.data}
+        compact={compact}
+        onDismiss={() => studyController.dismissQuestion()}
+      />
+    ) : undefined;
   const noteActions = useMemo<NoteCaptureActions>(
     () => ({
       onToggle: (thought) => void studyController.toggle({ thought }),
       onMark: (tag, thought) => void studyController.mark(tag, { thought }),
       onThought: (thought) => void studyController.addThought(thought),
       onKeepOffer: (thought) => void studyController.keepOffer({ thought }),
+      onQuestion: (thought) => void studyController.question({ thought }),
     }),
     [studyController],
   );
@@ -606,6 +623,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
                 localRecordingId: localId,
                 enrich: opts.study.enrich,
                 offerSlides: opts.study.offerSlides,
+                researchWeb: opts.study.researchWeb,
               },
               display,
             );
@@ -1110,6 +1128,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
           localRecordingId: localId,
           enrich: target.study?.enrich,
           offerSlides: target.study?.offerSlides,
+          researchWeb: target.study?.researchWeb,
         },
         display,
       );
@@ -1430,6 +1449,9 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
                             ? {
                                 status: study,
                                 actions: noteActions,
+                                answer: floating.isOpen
+                                  ? undefined
+                                  : answerCard(false),
                                 onViewNotes: () =>
                                   navigate(
                                     `/workspaces/${study.workspaceId}/study/${study.notebookId}`,
@@ -1505,6 +1527,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
             paused={recorder.status === "paused"}
             durationMs={recorder.durationMs}
             actions={noteActions}
+            answer={answerCard(true)}
           />,
           floating.container,
         )}

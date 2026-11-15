@@ -278,7 +278,6 @@ class ConfigurationTests(unittest.TestCase):
             output.read_text(),
         )
 
-
     def test_agent_runner_is_deployed_only_with_an_llm(self):
         secrets = configure.load_secrets(self.root / "s.json", self.root / "m.yaml")
         without = configure.render(configure.read_settings(self.env), secrets)
@@ -296,8 +295,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("  - name: agent-runner\n", with_llm)
         self.assertIn("image: localhost/root-transcribe-agent:latest", with_llm)
         config, app_secret = (
-            json.loads(part)
-            for part in with_llm.split("\n", 1)[1].split("\n---\n")[:2]
+            json.loads(part) for part in with_llm.split("\n", 1)[1].split("\n---\n")[:2]
         )
         self.assertEqual(
             config["data"]["LLM_BASE_URL"], "http://host.containers.internal:8001/v1"
@@ -316,13 +314,49 @@ class ConfigurationTests(unittest.TestCase):
             configure.render(configure.read_settings(self.env), secrets, arch="arm64"),
         )
 
+        # Web research: off without a Tavily key (no container, no secret) ...
+        self.assertNotIn("- name: search-mcp", with_llm)
+        self.assertNotIn("transcribe-search-secret", with_llm)
+        self.assertEqual(config["data"]["WEB_SEARCH_ENABLED"], "false")
+        self.assertEqual(config["data"]["SEARCH_MCP_URL"], "")
+        # ... and on with one: the key goes to the search container only.
+        self.env.write_text(self.env.read_text() + "TAVILY_API_KEY=tvly-secret\n")
+        with_search = configure.render(configure.read_settings(self.env), secrets)
+        self.assertIn("  - name: search-mcp\n", with_search)
+        documents = [
+            json.loads(part)
+            for part in with_search.split("\n", 1)[1].split("\n---\n")
+            if part.startswith("{")
+        ]
+        by_name = {doc["metadata"]["name"]: doc for doc in documents}
+        self.assertEqual(
+            by_name["transcribe-search-secret"]["stringData"],
+            {"TAVILY_API_KEY": "tvly-secret"},
+        )
+        self.assertNotIn(
+            "TAVILY_API_KEY", by_name["transcribe-app-secret"]["stringData"]
+        )
+        self.assertEqual(
+            by_name["transcribe-app-config"]["data"]["WEB_SEARCH_ENABLED"], "true"
+        )
+        self.assertEqual(
+            by_name["transcribe-app-config"]["data"]["SEARCH_MCP_URL"],
+            configure.SEARCH_MCP_URL,
+        )
+        self.assertEqual(with_search.count("tvly-secret"), 1)
+        search = with_search[
+            with_search.index(configure.SEARCH_BEGIN) : with_search.index(
+                configure.SEARCH_END
+            )
+        ]
+        self.assertNotIn("envFrom", search)
+        self.assertNotIn("LLM_", search)
+
     def test_llm_needs_a_model_name_and_a_valid_url(self):
         self.env.write_text(self.env.read_text() + "LLM_BASE_URL=http://llm:8001/v1\n")
         with self.assertRaisesRegex(ValueError, "LLM_MODEL"):
             configure.read_settings(self.env)
-        self.env.write_text(
-            "HF_TOKEN=test-token\nLLM_BASE_URL=llm:8001\nLLM_MODEL=m\n"
-        )
+        self.env.write_text("HF_TOKEN=test-token\nLLM_BASE_URL=llm:8001\nLLM_MODEL=m\n")
         with self.assertRaisesRegex(ValueError, "LLM_BASE_URL must be an HTTP"):
             configure.read_settings(self.env)
 
@@ -353,8 +387,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("Meeting notes:", message)
         manifest = output.read_text()
         config, app_secret = (
-            json.loads(part)
-            for part in manifest.split("\n", 1)[1].split("\n---\n")[:2]
+            json.loads(part) for part in manifest.split("\n", 1)[1].split("\n---\n")[:2]
         )
         self.assertEqual(config["data"]["LLM_BASE_URL"], llm + "/v1")
         self.assertEqual(config["data"]["LLM_MODEL"], "qwen3-27b")
@@ -369,6 +402,7 @@ class ConfigurationTests(unittest.TestCase):
         )  # fmt: skip
         self.assertEqual(code, 0)
         self.assertNotIn("agent-runner", output.read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

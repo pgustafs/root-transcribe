@@ -21,7 +21,7 @@ COPY agent-runner/pyproject.toml agent-runner/uv.lock ./
 RUN uv venv "$VIRTUAL_ENV" --python python3.12 \
     && UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV" uv sync --frozen --no-dev --no-cache
 
-COPY agent-runner/main.py ./main.py
+COPY agent-runner/main.py agent-runner/search_mcp.py ./
 
 RUN useradd -u 1001 -r -g 0 -d /app/home -s /sbin/nologin appuser \
     && mkdir -p /app/home /app/work \

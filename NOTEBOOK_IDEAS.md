@@ -8,7 +8,8 @@ Already built (see README, "Notebooks: take notes while recording"): marks at
 the press, a quick thought, the offer to keep a slide that changed, a
 generated title, tidy transcript, text on the slide, key terms with a
 glossary, a plain explanation for notes marked "Don't understand", wider
-context from the full recording, and search.
+context from the full recording, search, and the **Question** button (the
+last minute, an answer from the workspace and optionally from the web).
 
 ## Build first: what the learner does after the video
 
@@ -49,6 +50,14 @@ These give the largest learning gains according to the research.
   or into the recording's comments.
 
 ## Smaller follow-ups to what is built
+
+- Questions: search the workspace by meaning (embeddings) instead of by words;
+  today an earlier recording is found only if it uses the same words.
+- Questions: answer from your own documents through a RAG MCP server. The
+  steps are written down in `agent-runner/README.md` ("Adding another MCP tool
+  later").
+- Questions: let an administrator switch web research off per workspace; today
+  it is per installation (the Tavily key) and per recording (the switch).
 
 - A third mark, "Exam", was considered and left out; easy to add
   (`NOTE_TAGS` in `backend/app/models/study.py` and `frontend/src/api/study.ts`).

@@ -7,6 +7,7 @@ import {
   ChevronDownIcon,
   CircleHelpIcon,
   CopyIcon,
+  MessageCircleQuestionIcon,
   StarIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -26,7 +27,11 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { noteClock } from "@/utils/formatDuration";
 
-const TAG_ICON = { important: StarIcon, unclear: CircleHelpIcon } as const;
+const TAG_ICON = {
+  important: StarIcon,
+  unclear: CircleHelpIcon,
+  question: MessageCircleQuestionIcon,
+} as const;
 
 export function TagBadges({ tags }: { tags: NoteTag[] }) {
   const { t } = useTranslation("study");

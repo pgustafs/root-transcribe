@@ -368,9 +368,8 @@ async def test_tags_and_a_thought_come_with_the_capture_and_can_change(
     wid = await _make_workspace(client, user_token_headers)
     notebook = await _notebook(client, wid, user_token_headers, title="T")
     base = f"{API}/workspaces/{wid}/study"
-    assert (
-        await client.get(f"{base}/features", headers=user_token_headers)
-    ).json() == {"enrich": False}
+    found = await client.get(f"{base}/features", headers=user_token_headers)
+    assert found.json() == {"enrich": False, "web_research": False}
     session_id = await _start(client, wid, user_token_headers, notebook["id"])
     note_id, resp = await _put_note(
         client,
@@ -449,3 +448,62 @@ async def test_wider_context_comes_from_the_recordings_transcript(
     assert [s["text"] for s in wide["segments"]] == ["Hello everyone.", "Hi there."]
     assert wide["start_ms"] == 0 and wide["at_start"] is True
     assert wide["segments"][0]["speaker"]
+
+
+async def test_a_marked_question_is_queued_for_an_answer(
+    client: AsyncClient,
+    user_token_headers: dict,
+    meetings_enabled: _FakeAudioStore,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "http://llm/v1")
+    monkeypatch.setattr(settings, "WEB_SEARCH_ENABLED", True)
+    wid = await _make_workspace(client, user_token_headers)
+    notebook = await _notebook(client, wid, user_token_headers, title="T")
+    base = f"{API}/workspaces/{wid}/study"
+    found = await client.get(f"{base}/features", headers=user_token_headers)
+    assert found.json() == {"enrich": True, "web_research": True}
+    session_id = await _start(
+        client, wid, user_token_headers, notebook["id"], research_web=True
+    )
+    # The answer waits for the transcript: nothing but transcription is queued.
+    _, resp = await _put_note(
+        client, wid, user_token_headers, session_id, 0, tags="question"
+    )
+    assert resp.json()["tags"] == ["question"]
+    assert resp.json()["answer_status"] == "none"
+    # A question without sound cannot be heard.
+    _, silent = await _put_note(
+        client, wid, user_token_headers, session_id, 1, audio=False, tags="question"
+    )
+    assert (silent.json()["answer_status"], silent.json()["answer_error"]) == (
+        "failed",
+        "no_speech",
+    )
+    # An ordinary note that is marked as a question later, or asked again.
+    plain, _ = await _put_note(client, wid, user_token_headers, session_id, 2)
+    note = await db_session.get(StudyNote, uuid.UUID(plain))
+    note.status, note.text = "ready", "How do we back up the database?"
+    await db_session.commit()
+    marked = await client.patch(
+        f"{base}/notes/{plain}", headers=user_token_headers, json={"tags": ["question"]}
+    )
+    assert marked.json()["answer_status"] == "pending"
+    one = await client.get(f"{base}/notes/{plain}", headers=user_token_headers)
+    assert one.json()["id"] == plain and one.json()["answer_status"] == "pending"
+    note = await db_session.get(StudyNote, uuid.UUID(plain))
+    await db_session.refresh(note)
+    note.answer_status = "failed"
+    await db_session.commit()
+    again = await client.post(
+        f"{base}/notes/{plain}/answer", headers=user_token_headers
+    )
+    assert again.json()["answer_status"] == "pending"
+    names = [
+        row.task_name
+        for row in (await db_session.execute(select(TaskOutbox))).scalars().all()
+    ]
+    assert names.count("tasks.answer_study_question") == 2

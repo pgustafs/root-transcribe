@@ -14,6 +14,7 @@ import {
 } from "@/components/recording/RecordingDock";
 import { RecordingProvider } from "@/components/recording/RecordingProvider";
 import { FloatingNotePanel } from "@/components/study/FloatingNotePanel";
+import { QuestionAnswerCard } from "@/components/study/QuestionAnswer";
 import { StudyCropStep } from "@/components/study/StudyCropStep";
 import { ToastProvider } from "@/components/toast/ToastProvider";
 import i18n from "@/i18n";
@@ -54,6 +55,7 @@ const actions = () => ({
   onMark: vi.fn(),
   onThought: vi.fn(),
   onKeepOffer: vi.fn(),
+  onQuestion: vi.fn(),
 });
 
 function dock(
@@ -284,6 +286,12 @@ const note = (seq: number, over: Partial<StudyNote>): StudyNote => ({
   explanation: null,
   enrich_status: "none",
   enrich_error: null,
+  question: null,
+  answer_short: null,
+  answer: null,
+  answer_sources: null,
+  answer_status: "none",
+  answer_error: null,
   end_reason: null,
   source_time_url: null,
   created_at: "2026-11-15T10:00:00Z",
@@ -317,7 +325,7 @@ function notebookPage(notes: StudyNote[]) {
       HttpResponse.json(detail),
     ),
     http.get(`${API}/workspaces/w1/study/features`, () =>
-      HttpResponse.json({ enrich: true }),
+      HttpResponse.json({ enrich: true, web_research: true }),
     ),
     http.get(`${API}/workspaces/w1/study/notes/:id/image`, () =>
       HttpResponse.arrayBuffer(new Uint8Array([1, 2, 3]).buffer, {
@@ -540,6 +548,151 @@ it("notebook: what the model added, marks, search, glossary and wider context", 
   expect(await screen.findByText("Index")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Index scan" }));
   expect(await screen.findAllByRole("article")).toHaveLength(2);
+});
+
+// --- a question and its answer ----------------------------------------------------
+
+it("question: the button sends the typed thought along", async () => {
+  const given = float({ count: 0 });
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "A thought for this note" }),
+    "From Anna",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Question" }));
+  expect(given.onQuestion).toHaveBeenCalledWith("From Anna");
+});
+
+it("question: the answer card follows the work and names what it is", async () => {
+  const onDismiss = vi.fn();
+  const card = (data: StudyNote | undefined) => (
+    <QuestionAnswerCard workspaceId="w1" note={data} onDismiss={onDismiss} />
+  );
+  const view = wrap(card(undefined));
+  // Not on the server yet: the last minute is being listened to.
+  expect(
+    screen.getByText("Listening back to the last minute…"),
+  ).toBeInTheDocument();
+  // The question and a first answer arrive while research goes on.
+  const working = note(0, {
+    tags: ["question"],
+    question: "How do we back up the orders database?",
+    answer_short: "Usually with a dump before the change.",
+    answer_status: "processing",
+  });
+  const rerender = (data: StudyNote) =>
+    view.rerender(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>{card(data)}</MemoryRouter>
+        </QueryClientProvider>
+      </I18nextProvider>,
+    );
+  rerender(working);
+  expect(
+    screen.getByText("How do we back up the orders database?"),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("Usually with a dump before the change."),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Looking for more…")).toBeInTheDocument();
+  // Final: sources from the workspace link to the moment, web pages open
+  // in a new tab, and the answer is labelled as a suggestion.
+  rerender({
+    ...working,
+    answer_short: "Nightly, to the second site.",
+    answer_status: "ready",
+    answer_sources: [
+      {
+        kind: "recording",
+        label: "S1",
+        title: "Ops sync",
+        recording_id: "r1",
+        start_ms: 95_000,
+      },
+      { kind: "web", title: "pg_dump", url: "https://example.org/pg_dump" },
+    ],
+  });
+  expect(screen.getByText("Nightly, to the second site.")).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "S1 · Ops sync at 01:35" }),
+  ).toHaveAttribute("href", "/workspaces/w1?recording=r1&t=95");
+  const web = screen.getByRole("link", { name: "pg_dump" });
+  expect(web).toHaveAttribute("href", "https://example.org/pg_dump");
+  expect(web).toHaveAttribute("target", "_blank");
+  expect(
+    screen.getByText("A suggestion. Check it before you rely on it."),
+  ).toBeInTheDocument();
+  // Nothing was asked: said plainly.
+  rerender(
+    note(0, {
+      tags: ["question"],
+      answer_status: "failed",
+      answer_error: "no_question",
+    }),
+  );
+  expect(
+    screen.getByText("No question was heard in the last minute."),
+  ).toBeInTheDocument();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Close the answer" }),
+  );
+  expect(onDismiss).toHaveBeenCalledOnce();
+});
+
+it("notebook: a question shows its answer and can be tried again", async () => {
+  const asked = vi.fn();
+  server.use(
+    http.post(`${API}/workspaces/w1/study/notes/n1/answer`, () => {
+      asked();
+      return HttpResponse.json(
+        note(1, { tags: ["question"], answer_status: "pending" }),
+      );
+    }),
+  );
+  notebookPage([
+    note(0, {
+      tags: ["question"],
+      question: "How do we back up the orders database?",
+      answer_short: "Nightly, to the second site.",
+      answer: "A **nightly** backup goes to the second site [S1].",
+      answer_status: "ready",
+      answer_sources: [
+        {
+          kind: "note",
+          label: "S1",
+          title: "Runbook",
+          notebook_id: "nb9",
+          note_id: "n9",
+        },
+      ],
+    }),
+    note(1, {
+      tags: ["question"],
+      answer_status: "failed",
+      answer_error: "no_question",
+    }),
+  ]);
+  const entries = await screen.findAllByRole("article");
+  const first = within(entries[0]);
+  expect(
+    first.getByText("How do we back up the orders database?"),
+  ).toBeInTheDocument();
+  // The full answer is shown formatted, with its source.
+  expect(first.getByText("nightly").tagName).toBe("STRONG");
+  expect(
+    first.getByRole("link", { name: "S1 · Note: Runbook" }),
+  ).toHaveAttribute("href", "/workspaces/w1/study/nb9");
+  const second = within(entries[1]);
+  expect(
+    second.getByText("No question was heard in the last minute."),
+  ).toBeInTheDocument();
+  await userEvent.click(second.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(asked).toHaveBeenCalledOnce());
+  expect(
+    await within(screen.getAllByRole("article")[1]).findByText(
+      "Finding the question…",
+    ),
+  ).toBeInTheDocument();
 });
 
 it("notebook: a refused export says why", async () => {

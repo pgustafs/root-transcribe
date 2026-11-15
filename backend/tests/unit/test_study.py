@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.services import study_enrich, study_export, study_source
+from app.services import study_answer, study_enrich, study_export, study_source
 from app.services.study_export import ExportNote
 from app.worker import tasks as tasks_module
 
@@ -462,3 +462,323 @@ def test_export_carries_what_was_added() -> None:
         )
     ]
     assert order == sorted(order)
+
+
+# --- a question and its answer ---------------------------------------------------
+
+HEARD = (
+    "so that is the new schema. um one thing though, how do we back up the "
+    "orders database before we migrate it, do we have a plan for that"
+)
+QUESTION = "How do we back up the orders database?"
+
+
+def test_question_answer_is_parsed_and_search_words_are_cleaned() -> None:
+    body = {
+        "question": "How do we back up the  orders database?",
+        "search_terms": [
+            "backup",
+            "the",
+            "orders database",
+            "Backup",
+            "x",
+            "migration",
+        ],
+        "answer": "",
+    }
+    parsed = study_answer.parse_extract(json.dumps(body))
+    assert parsed.question == QUESTION
+    assert parsed.terms == ["backup", "orders database", "migration"]
+    assert parsed.answer is None
+    # No question was asked.
+    nothing = study_answer.parse_extract('{"question": "", "search_terms": []}')
+    assert nothing.question is None
+    # No search words from the model: they are taken from the question.
+    fallback = study_answer.parse_extract('{"question": "Where is the backup plan?"}')
+    assert "backup" in fallback.terms and "Where" not in fallback.terms
+    assert study_answer.web_sources(
+        [
+            {"title": "A", "url": "https://a.example/x"},
+            {"title": "dup", "url": "https://a.example/x"},
+            {"title": "bad", "url": "javascript:alert(1)"},
+            "junk",
+        ]
+    ) == [{"kind": "web", "title": "A", "url": "https://a.example/x"}]
+
+
+def _recording(session, workspace_id, title, lines, *, sensitivity="internal"):
+    from app.models.meeting_recording import MeetingRecording
+    from app.models.meeting_transcript_revision import MeetingTranscriptRevision
+    from app.models.meeting_transcript_segment import MeetingTranscriptSegment
+
+    rec = MeetingRecording(
+        workspace_id=workspace_id,
+        title=title,
+        status="completed",
+        audio_key=f"k-{title}",
+        sensitivity=sensitivity,
+    )
+    session.add(rec)
+    session.flush()
+    revision = MeetingTranscriptRevision(
+        recording_id=rec.id, revision_number=1, state="approved"
+    )
+    session.add(revision)
+    session.flush()
+    for idx, text in enumerate(lines):
+        session.add(
+            MeetingTranscriptSegment(
+                recording_id=rec.id,
+                revision_id=revision.id,
+                idx=idx,
+                start_ms=idx * 10_000,
+                end_ms=idx * 10_000 + 9_000,
+                speaker_label="SPEAKER_00",
+                text=text,
+            )
+        )
+    rec.latest_revision_id = rec.approved_revision_id = revision.id
+    session.commit()
+    return rec
+
+
+def _question_note():
+    from app.models.study import StudyNotebook
+    from app.models.user import User
+    from app.models.workspace import Workspace
+
+    session, note = _database()
+    note.status, note.text = "ready", HEARD
+    note.tags, note.answer_status = ["question"], "pending"
+    session.commit()
+    notebook = session.get(StudyNotebook, note.notebook_id)
+    workspace = session.get(Workspace, notebook.workspace_id)
+    owner = session.get(User, notebook.owner_id)
+    # The owner made the workspace: an implicit owner role.
+    workspace.created_by_id = owner.id
+    session.commit()
+    return session, note, workspace, owner
+
+
+def test_workspace_search_ranks_excerpts_and_respects_access() -> None:
+    from app.models.study import StudyNote
+    from app.models.user import User
+
+    session, note, workspace, owner = _question_note()
+    earlier = _recording(
+        session,
+        workspace.id,
+        "Ops sync",
+        [
+            "First the agenda.",
+            "The orders database gets a nightly backup to the second site.",
+            "A backup is also taken before every migration.",
+            "Then lunch.",
+        ],
+    )
+    _recording(
+        session,
+        workspace.id,
+        "Board",
+        ["The backup of the orders database is discussed here too."],
+        sensitivity="restricted",
+    )
+    session.add(
+        StudyNote(
+            id=uuid.uuid4(),
+            notebook_id=note.notebook_id,
+            session_id=note.session_id,
+            seq=5,
+            captured_ms=1,
+            status="ready",
+            text="Remember: the migration runbook lists the backup step.",
+            title="Runbook",
+        )
+    )
+    session.commit()
+    terms = ["backup", "orders database", "migration"]
+    found = study_answer.search_workspace(
+        session,
+        user=owner,
+        workspace_id=workspace.id,
+        terms=terms,
+        exclude_note_id=note.id,
+    )
+    # The restricted recording is never used; the best excerpt comes first
+    # and carries its neighbours for context.
+    assert {f.title for f in found} == {"Ops sync", "Runbook"}
+    best = found[0]
+    assert best.kind == "recording" and best.recording_id == earlier.id
+    assert "nightly backup" in best.text and "before every migration" in best.text
+    assert best.source("S1")["start_ms"] == 0
+    assert [f.kind for f in found].count("note") == 1
+    # Somebody without a role in the workspace gets no transcripts, and other
+    # people's notes are never searched.
+    stranger = User(email="b@example.com", hashed_password="")
+    session.add(stranger)
+    session.commit()
+    assert (
+        study_answer.search_workspace(
+            session, user=stranger, workspace_id=workspace.id, terms=terms
+        )
+        == []
+    )
+    assert (
+        study_answer.search_workspace(
+            session, user=owner, workspace_id=workspace.id, terms=[]
+        )
+        == []
+    )
+    session.close()
+
+
+class _Answers:
+    """The runner for a question: extract, (research,) compose."""
+
+    def __init__(self, *, question=True, web_fails=False) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.question, self.web_fails = question, web_fails
+
+    def chat_sync(self, *, instructions, text="", image=None, **_):
+        from app.services.agent_runner import AgentAnswer
+
+        if instructions == study_answer.EXTRACT_INSTRUCTIONS:
+            self.calls.append(("extract", text))
+            return AgentAnswer(
+                text=json.dumps(
+                    {
+                        "question": QUESTION if self.question else "",
+                        "search_terms": ["backup", "orders database"],
+                        "answer": "Usually with a dump before the change.",
+                    }
+                )
+            )
+        self.calls.append(("compose", text))
+        return AgentAnswer(
+            text=json.dumps(
+                {
+                    "short_answer": "Nightly, to the second site.",
+                    "answer": "A nightly backup goes to the second site [S1].",
+                }
+            )
+        )
+
+    def research_sync(self, *, question, **_):
+        from app.services.agent_runner import AgentAnswer, AgentRunError
+
+        self.calls.append(("research", question))
+        if self.web_fails:
+            raise AgentRunError("The search service answered HTTP 401.")
+        return AgentAnswer(
+            text="Use pg_dump ([docs](https://example.org/pg_dump)).",
+            sources=({"title": "pg_dump", "url": "https://example.org/pg_dump"},),
+        )
+
+
+def _answer(monkeypatch: pytest.MonkeyPatch, session, note, runner):
+    @contextmanager
+    def _scope():
+        yield session
+
+    monkeypatch.setattr(tasks_module, "session_scope", _scope)
+    monkeypatch.setattr("app.services.agent_runner.get_agent_runner", lambda: runner)
+    return tasks_module.answer_study_question(str(note.id))
+
+
+def test_question_gets_an_answer_from_the_workspace_without_the_web(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, note, workspace, _owner = _question_note()
+    _recording(
+        session,
+        workspace.id,
+        "Ops sync",
+        ["The orders database gets a nightly backup to the second site."],
+    )
+    runner = _Answers()
+    assert _answer(monkeypatch, session, note, runner) == {"status": "ready"}
+    session.refresh(note)
+    assert note.question == QUESTION
+    assert note.answer_short == "Nightly, to the second site."
+    assert note.answer.endswith("[S1].")
+    assert [s["kind"] for s in note.answer_sources] == ["recording"]
+    assert note.answer_sources[0]["label"] == "S1"
+    # The web was not asked: this session did not allow it.
+    assert [kind for kind, _ in runner.calls] == ["extract", "compose"]
+    assert "[S1] (Ops sync)" in runner.calls[1][1]
+    # A duplicate delivery does nothing.
+    assert _answer(monkeypatch, session, note, runner)["status"] == "skipped"
+    session.close()
+
+
+def test_web_research_gets_the_question_only_and_its_failure_is_not_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models.study import StudySession
+
+    monkeypatch.setattr(tasks_module.settings, "WEB_SEARCH_ENABLED", True)
+    session, note, _workspace, _owner = _question_note()
+    session.get(StudySession, note.session_id).research_web = True
+    session.commit()
+    runner = _Answers()
+    assert _answer(monkeypatch, session, note, runner) == {"status": "ready"}
+    session.refresh(note)
+    kinds = [kind for kind, _ in runner.calls]
+    assert kinds == ["extract", "research", "compose"]
+    # Nothing of what was said goes to the web agent, only the question.
+    assert runner.calls[1][1] == QUESTION
+    assert note.answer_sources == [
+        {"kind": "web", "title": "pg_dump", "url": "https://example.org/pg_dump"}
+    ]
+    assert "pg_dump" in runner.calls[2][1]
+    session.close()
+
+    # The search is down and the workspace has nothing: the first answer stays.
+    session, note, _workspace, _owner = _question_note()
+    session.get(StudySession, note.session_id).research_web = True
+    session.commit()
+    runner = _Answers(web_fails=True)
+    assert _answer(monkeypatch, session, note, runner) == {"status": "ready"}
+    session.refresh(note)
+    assert note.answer_short == "Usually with a dump before the change."
+    assert note.answer is None and "HTTP 401" in note.answer_error
+    session.close()
+
+
+def test_no_question_in_what_was_said_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, note, _workspace, _owner = _question_note()
+    assert _answer(monkeypatch, session, note, _Answers(question=False)) == {
+        "status": "failed"
+    }
+    session.refresh(note)
+    assert (note.answer_status, note.answer_error) == ("failed", "no_question")
+    assert note.question is None
+    session.close()
+
+
+def test_transcribed_question_is_queued_for_its_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models.task_outbox import TaskOutbox
+
+    monkeypatch.setattr(tasks_module, "_nudge_outbox", lambda: None)
+    monkeypatch.setattr(tasks_module.settings, "LLM_BASE_URL", "http://llm/v1")
+    session, note = _database()
+    note.tags = ["question"]
+    session.commit()
+    _run(monkeypatch, session, note, _Stt(text=HEARD))
+    session.refresh(note)
+    assert note.answer_status == "pending"
+    names = sorted(row.task_name for row in session.query(TaskOutbox).all())
+    assert names == ["tasks.answer_study_question", "tasks.enrich_study_note"]
+    session.close()
+    # Silence: there is no question to find.
+    session, note = _database()
+    note.tags = ["question"]
+    session.commit()
+    _run(monkeypatch, session, note, _Stt(text=" "))
+    session.refresh(note)
+    assert (note.answer_status, note.answer_error) == ("failed", "no_speech")
+    session.close()

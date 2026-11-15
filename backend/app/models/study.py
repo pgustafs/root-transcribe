@@ -31,7 +31,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 #: What the learner can mark a note with at the press.
-NOTE_TAGS = ("important", "unclear")
+NOTE_TAGS = ("important", "unclear", "question")
+#: A question is heard further back than an ordinary note.
+QUESTION_LOOKBACK_SECONDS = 60
 #: none = not asked for (or no model) | pending | processing | ready | failed
 ENRICH_STATUSES = ("none", "pending", "processing", "ready", "failed")
 
@@ -100,6 +102,9 @@ class StudySession(Base):
     # The learner asked for notes to be worked on by the language model
     # (title, tidy text, key terms, text on the slide).
     enrich: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # The learner allowed questions from this session to be researched on the
+    # web (the question itself leaves the installation, nothing else).
+    research_web: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
@@ -147,6 +152,21 @@ class StudyNote(Base):
     terms: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # A plain-language explanation, for notes marked "unclear".
     explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # --- a note marked "question": what was asked and a suggested answer ---
+    question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Two or three sentences, shown while the meeting goes on.
+    answer_short: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The whole answer (Markdown).
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Where it comes from: [{"kind": "recording"|"note"|"web", ...}]
+    answer_sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # none | pending | processing | ready | failed
+    answer_status: Mapped[str] = mapped_column(
+        String(20), default="none", nullable=False
+    )
+    # A code (no_speech, no_question) or a readable reason.
+    answer_error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    answer_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     enrich_status: Mapped[str] = mapped_column(
         String(20), default="none", nullable=False
     )

@@ -20,7 +20,9 @@
     "offerSlides": "Offer to keep a slide when it changes",
     "offerSlidesHelp": "When a new slide appears, you can still keep the previous one as a note for 20 seconds, with what was said before the change.",
     "enrich": "Improve notes with AI",
-    "enrichHelp": "Adds a title, a tidy version of the text, key terms and the text on the slide. The image and the text of each note are sent to this installation's language model."
+    "enrichHelp": "Adds a title, a tidy version of the text, key terms and the text on the slide. The image and the text of each note are sent to this installation's language model.",
+    "researchWeb": "Research questions on the web",
+    "researchWebHelp": "When you press Question, the question itself (never the recording or its transcript) is sent to the Tavily search service. The answer lists the pages it used."
   },
   "crop": {
     "title": "Choose what to save",
@@ -83,7 +85,8 @@
   "marks": {
     "label": "Mark the note",
     "important": "Important",
-    "unclear": "Don't understand"
+    "unclear": "Don't understand",
+    "question": "Question"
   },
   "thought": {
     "label": "A thought for this note",
@@ -93,6 +96,29 @@
     "keep": "Keep previous slide",
     "line": "The slide changed",
     "announce": "The slide changed. You can keep the previous slide as a note."
+  },
+  "question": {
+    "button": "Question",
+    "help": "Somebody just asked a question: keep the last minute and suggest an answer"
+  },
+  "answer": {
+    "title": "Suggested answer",
+    "dismiss": "Close the answer",
+    "listening": "Listening back to the last minute…",
+    "finding": "Finding the question…",
+    "researching": "Looking for more…",
+    "noQuestion": "No question was heard in the last minute.",
+    "noSpeech": "Nothing was said in the last minute.",
+    "failed": "No answer could be found.",
+    "unavailable": "Answers need a language model, which this installation does not have.",
+    "sources": "Sources",
+    "sourceRecording": "{{label}} · {{title}} at {{time}}",
+    "sourceNote": "{{label}} · Note: {{title}}",
+    "check": "A suggestion. Check it before you rely on it.",
+    "moreInNotebook": "A suggestion. Sources and the full answer are in the notebook.",
+    "question": "Question",
+    "suggested": "Suggested answer",
+    "again": "Try again"
   },
   "page": {
     "notebooks": "Notebooks",

@@ -1,3 +1,4 @@
+import { type ReactNode, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -5,6 +6,7 @@ import {
   NoteCaptureControls,
 } from "@/components/study/NoteCaptureControls";
 import type { StudyStatus } from "@/lib/study/noteController";
+import { FLOAT_SIZE } from "@/lib/study/studyChoice";
 import { formatMsClock } from "@/utils/formatDuration";
 
 type Props = {
@@ -14,7 +16,11 @@ type Props = {
   paused: boolean;
   durationMs: number;
   actions: NoteCaptureActions;
+  /** The answer card of a marked question, when there is one. */
+  answer?: ReactNode;
 };
+
+const FLOAT_HEIGHT_WITH_ANSWER = 520;
 
 /**
  * The content of the floating window: the capture controls and one line that
@@ -26,8 +32,29 @@ export function FloatingNotePanel({
   paused,
   durationMs,
   actions,
+  answer,
 }: Props) {
   const { t } = useTranslation("study");
+  const root = useRef<HTMLDivElement>(null);
+  /** Make room for the answer. A window may only be resized from a click,
+   * so this happens on the Question press, before there is an answer. */
+  const resize = (height: number) => {
+    try {
+      root.current?.ownerDocument.defaultView?.resizeTo(
+        FLOAT_SIZE.width,
+        height,
+      );
+    } catch {
+      // Not allowed here: the answer scrolls inside the window instead.
+    }
+  };
+  const windowActions: NoteCaptureActions = {
+    ...actions,
+    onQuestion: (thought) => {
+      resize(FLOAT_HEIGHT_WITH_ANSWER);
+      actions.onQuestion(thought);
+    },
+  };
   const noteOpen = status.openSinceMs !== null;
   const canCapture = status.videoAvailable && recording;
 
@@ -51,13 +78,14 @@ export function FloatingNotePanel({
 
   return (
     <div
-      className="flex min-h-dvh flex-col justify-center gap-2 bg-background p-3 text-foreground"
+      ref={root}
+      className="flex min-h-dvh flex-col gap-2 overflow-y-auto bg-background p-3 text-foreground"
       data-testid="study-float"
     >
       <NoteCaptureControls
         status={status}
         canCapture={canCapture}
-        actions={actions}
+        actions={windowActions}
         variant="floating"
         describedBy="study-float-state"
         focusOnMount
@@ -77,6 +105,7 @@ export function FloatingNotePanel({
             ? t("dock.saved")
             : ""}
       </span>
+      {answer}
     </div>
   );
 }

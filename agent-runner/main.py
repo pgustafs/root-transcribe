@@ -12,6 +12,10 @@ that hold database and storage credentials. It knows only the LLM endpoint.
             -> {"answer": "...", "error": null, "model": "..."}
        One plain model call without the agent (short, structured answers, and
        questions about an image).
+    POST /research {"question": "..."}
+            -> {"answer": "...", "sources": [{"title": "...", "url": "..."}], ...}
+       A CUGA agent with one tool, web_search, served by the search MCP server
+       in the pod (SEARCH_MCP_URL). Off when that address is not set.
     GET /health
 
 Listens on the pod's loopback only (see deploy/root-transcribe.yaml).
@@ -30,6 +34,10 @@ import urllib.request
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "").rstrip("/")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 LLM_API_KEY = os.environ.get("LLM_API_KEY") or "not-needed"
+# The search MCP server (web_search). Empty = no web research.
+SEARCH_MCP_URL = os.environ.get("SEARCH_MCP_URL", "").strip()
+# One question may cost at most this many searches.
+MAX_SEARCHES = 4
 WORK_DIR = os.environ.get("AGENT_RUNNER_WORK_DIR") or tempfile.mkdtemp(prefix="agent-runner-")
 # Notes are written from the transcript in one pass; a model's "thinking" phase
 # only spends the answer budget (a small context window is then used up before
@@ -57,6 +65,7 @@ os.environ.setdefault("ENV_FILE", os.path.join(WORK_DIR, "no.env"))
 from cuga import CugaAgent  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from langchain_core.messages import HumanMessage, SystemMessage  # noqa: E402
+from langchain_core.tools import StructuredTool  # noqa: E402
 from langchain_openai import ChatOpenAI  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
@@ -79,6 +88,26 @@ class ChatRequest(BaseModel):
     image_type: str = Field(default="image/png", pattern=r"^image/(png|jpeg|webp)$")
     timeout_seconds: float = Field(default=300, gt=0, le=3600)
 
+
+class ResearchRequest(BaseModel):
+    # Only the question: the caller never sends a transcript here, because
+    # what the agent is given can end up in a search query.
+    question: str = Field(min_length=3, max_length=1000)
+    timeout_seconds: float = Field(default=300, gt=0, le=1800)
+
+
+RESEARCH_INSTRUCTIONS = """\
+You answer one question by researching it on the public web with the
+web_search tool.
+
+- Search before you answer. Use short, specific queries; search again with
+  other words if the first results do not answer the question (at most four
+  searches).
+- Answer in at most 200 words, in the language of the question, in Markdown.
+- After each statement, give the page it comes from as a Markdown link.
+  Use only pages the tool returned; never invent an address.
+- If the pages do not answer the question, say so and give what they do say.
+"""
 
 _context_tokens: int | None = None
 
@@ -105,6 +134,11 @@ def context_tokens() -> int | None:
     return _context_tokens
 
 
+class Source(BaseModel):
+    title: str
+    url: str
+
+
 class RunResponse(BaseModel):
     answer: str = ""
     error: str | None = None
@@ -112,6 +146,8 @@ class RunResponse(BaseModel):
     seconds: float = 0.0
     llm_calls: int | None = None
     tokens: int | None = None
+    # /research: the pages the search tool returned, in the order seen.
+    sources: list[Source] = Field(default_factory=list)
 
 
 def _receipt_numbers(receipt: object) -> tuple[int | None, int | None]:
@@ -133,11 +169,11 @@ def _build_model() -> ChatOpenAI:
     )
 
 
-def _build_agent(instructions: str) -> CugaAgent:
+def _build_agent(instructions: str, tools: list | None = None) -> CugaAgent:
     """A fresh agent per run: instructions are fixed when an agent is built."""
     return CugaAgent(
         model=_build_model(),
-        tools=[],  # transcript in, document out; nothing to call
+        tools=tools or [],  # documents: transcript in, text out; nothing to call
         special_instructions=instructions,
         cuga_folder=tempfile.mkdtemp(prefix="cuga-", dir=WORK_DIR),
         auto_load_policies=False,
@@ -151,6 +187,7 @@ async def health() -> dict:
     return {
         "status": "ok" if LLM_BASE_URL and LLM_MODEL else "unconfigured",
         "model": LLM_MODEL,
+        "web_search": bool(SEARCH_MCP_URL),
         "context_tokens": await asyncio.to_thread(context_tokens),
     }
 
@@ -251,4 +288,97 @@ async def chat(request: ChatRequest) -> RunResponse:
         error=None if answer else "The model returned an empty answer.",
         model=LLM_MODEL,
         seconds=round(time.monotonic() - started, 1),
+    )
+
+
+async def _search(query: str) -> list[dict]:
+    """One call to the search MCP server. Raises on a transport problem."""
+    from fastmcp import Client
+
+    async with Client(SEARCH_MCP_URL) as client:
+        result = await client.call_tool("web_search", {"query": query, "max_results": 5})
+    data = result.data if isinstance(result.data, dict) else {}
+    if data.get("error"):
+        raise RuntimeError(str(data["error"]))
+    items = data.get("results")
+    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+
+
+def _search_tool(found: list[dict]) -> StructuredTool:
+    """The agent's one tool. Every page it returns is recorded in ``found``,
+    so the sources shown to the user come from the tool, not from the model."""
+    used = 0
+
+    async def web_search(query: str) -> str:
+        """Search the public web. Returns the best pages with their text.
+
+        Args:
+            query: A short, specific search query.
+        """
+        nonlocal used
+        if used >= MAX_SEARCHES:
+            return "No more searches are allowed. Answer from what you have."
+        used += 1
+        try:
+            results = await _search(query)
+        except Exception as exc:  # noqa: BLE001 - told to the agent, which can go on
+            return f"The search failed: {exc}"
+        if not results:
+            return "No pages were found for this query."
+        lines = []
+        for item in results:
+            url = str(item.get("url") or "")
+            title = str(item.get("title") or url)
+            if url and all(seen.get("url") != url for seen in found):
+                found.append({"title": title, "url": url})
+            lines.append(f"### {title}\n{url}\n{item.get('content') or ''}")
+        return "\n\n".join(lines)
+
+    return StructuredTool.from_function(
+        coroutine=web_search,
+        name="web_search",
+        description="Search the public web. Returns the best pages with their text.",
+    )
+
+
+@app.post("/research")
+async def research(request: ResearchRequest) -> RunResponse:
+    """Answer a question from the web: a CUGA agent with the web_search tool."""
+    if not (LLM_BASE_URL and LLM_MODEL):
+        return RunResponse(error="The agent runner has no LLM endpoint configured.")
+    if not SEARCH_MCP_URL:
+        return RunResponse(error="Web search is not configured.", model=LLM_MODEL)
+    started = time.monotonic()
+    found: list[dict] = []
+    async with _one_at_a_time:
+        try:
+            agent = _build_agent(RESEARCH_INSTRUCTIONS, [_search_tool(found)])
+            result = await asyncio.wait_for(
+                agent.invoke(request.question), timeout=request.timeout_seconds
+            )
+        except TimeoutError:
+            return RunResponse(
+                error=f"The research did not finish within {request.timeout_seconds:.0f} seconds.",
+                model=LLM_MODEL,
+                seconds=round(time.monotonic() - started, 1),
+            )
+        except Exception as exc:  # noqa: BLE001 - reported to the caller, not raised
+            return RunResponse(
+                error=f"{type(exc).__name__}: {exc}"[:2000],
+                model=LLM_MODEL,
+                seconds=round(time.monotonic() - started, 1),
+            )
+    calls, tokens = _receipt_numbers(getattr(result, "receipt", None))
+    error = getattr(result, "error", None)
+    answer = "" if error else str(getattr(result, "answer", "") or "").strip()
+    if not error and answer in ("", "No answer found"):
+        answer, error = "", "The agent returned no answer."
+    return RunResponse(
+        answer=answer,
+        error=str(error)[:2000] if error else None,
+        model=LLM_MODEL,
+        seconds=round(time.monotonic() - started, 1),
+        llm_calls=calls,
+        tokens=tokens,
+        sources=[Source(**item) for item in found[:10]],
     )

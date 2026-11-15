@@ -142,7 +142,10 @@ async def features(
 ) -> StudyFeatures:
     """What this installation can do with notes."""
     await _guard(session, user, workspace_id)
-    return StudyFeatures(enrich=bool(settings.LLM_BASE_URL.strip()))
+    has_model = bool(settings.LLM_BASE_URL.strip())
+    return StudyFeatures(
+        enrich=has_model, web_research=has_model and settings.WEB_SEARCH_ENABLED
+    )
 
 
 # --- notebooks ----------------------------------------------------------------
@@ -323,6 +326,13 @@ async def export_notebook(
                     for t in (note.terms or [])
                 ),
                 explanation=note.explanation,
+                question=note.question,
+                answer=note.answer or note.answer_short,
+                answer_links=tuple(
+                    (s.get("title", ""), s.get("url", ""))
+                    for s in (note.answer_sources or [])
+                    if s.get("kind") == "web" and s.get("url")
+                ),
                 image=None,
                 source_time_url=note.source_time_url,
             ),
@@ -389,6 +399,7 @@ async def put_session(
         language=payload.language,
         mode=payload.mode,
         enrich=payload.enrich,
+        research_web=payload.research_web,
         started_at=payload.started_at or datetime.now(UTC),
     )
     session.add(row)
@@ -595,6 +606,9 @@ async def put_note(
     elif study_crud.enrich_wanted(study_session):
         # No speech to wait for: the image can be read at once.
         outbox = await study_crud.queue_enrich(session, note, headers=_headers(user))
+    if audio_bytes is None and "question" in note.tags:
+        # A question nobody could hear: say so instead of waiting forever.
+        note.answer_status, note.answer_error = "failed", "no_speech"
     await study_crud.touch_notebook(session, notebook_id)
     await session.commit()
     if outbox is not None:
@@ -640,6 +654,7 @@ async def update_note(
     if payload.comment is not None:
         note.comment = payload.comment.strip() or None
     outbox = None
+    answer_outbox = None
     if payload.tags is not None:
         before = set(note.tags or [])
         note.tags = _tags(list(payload.tags))
@@ -657,6 +672,17 @@ async def update_note(
             outbox = await study_crud.queue_enrich(
                 session, note, headers=_headers(user)
             )
+        # Newly marked as a question: look for an answer.
+        if (
+            "question" in note.tags
+            and "question" not in before
+            and note.answer_status in ("none", "failed")
+            and note.status == "ready"
+            and study_crud.answer_wanted(note)
+        ):
+            answer_outbox = await study_crud.queue_answer(
+                session, note, headers=_headers(user)
+            )
     url = payload.source_time_url
     if url is None:
         pass
@@ -672,6 +698,52 @@ async def update_note(
                 "The link does not point at this notebook's source", status_code=422
             )
         note.source_time_url = study_source.normalized(url)
+    await session.commit()
+    for row in (outbox, answer_outbox):
+        if row is not None:
+            await try_dispatch(session, row)
+    await session.refresh(note)
+    return _note_public(note)
+
+
+@router.get(f"{_WS}/notes/{{note_id}}", dependencies=_ENABLED)
+async def get_note(
+    workspace_id: uuid.UUID,
+    note_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> NotePublic:
+    """One note (the recorder polls this for the answer to a question)."""
+    await _guard(session, user, workspace_id)
+    note, _owner_notebook = await _note(session, user, workspace_id, note_id)
+    return _note_public(note)
+
+
+@router.post(f"{_WS}/notes/{{note_id}}/answer", dependencies=_ENABLED)
+async def answer_note(
+    workspace_id: uuid.UUID,
+    note_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> NotePublic:
+    """Look for an answer to a note's question (again)."""
+    await _guard(session, user, workspace_id)
+    note, _owner_notebook = await _note(session, user, workspace_id, note_id)
+    if not settings.LLM_BASE_URL.strip():
+        raise ConflictError("No language model is configured for this installation")
+    if note.answer_status in ("pending", "processing") or note.status in (
+        "pending",
+        "processing",
+    ):
+        return _note_public(note)
+    if "question" not in (note.tags or []):
+        note.tags = _tags([*(note.tags or []), "question"])
+    if not (note.text or "").strip():
+        note.answer_status, note.answer_error = "failed", "no_speech"
+        await session.commit()
+        await session.refresh(note)
+        return _note_public(note)
+    outbox = await study_crud.queue_answer(session, note, headers=_headers(user))
     await session.commit()
     if outbox is not None:
         await try_dispatch(session, outbox)

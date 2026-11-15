@@ -23,7 +23,11 @@ STATUS_TEXT = {
     "screenshot_only": "Screenshot only. Tab audio was unavailable.",
 }
 
-TAG_TEXT = {"important": "Important", "unclear": "Did not understand"}
+TAG_TEXT = {
+    "important": "Important",
+    "unclear": "Did not understand",
+    "question": "Question",
+}
 
 _MONTHS = (
     "January",
@@ -60,6 +64,10 @@ class ExportNote:
     #: (term, definition) pairs
     terms: tuple[tuple[str, str], ...] = ()
     explanation: str | None = None
+    question: str | None = None
+    answer: str | None = None
+    #: (title, url) of web pages the answer used
+    answer_links: tuple[tuple[str, str], ...] = ()
 
 
 def clock(ms: int) -> str:
@@ -126,6 +134,14 @@ def build_markdown(
             lines += [quoted, ""]
         else:
             lines += [f"*{STATUS_TEXT.get(note.status, STATUS_TEXT['pending'])}*", ""]
+        if (note.question or "").strip():
+            lines += [f"**Question:** {note.question.strip()}", ""]
+        if (note.answer or "").strip():
+            lines += ["**Suggested answer**", "", note.answer.strip(), ""]
+            if note.answer_links:
+                lines += ["Sources:", ""]
+                lines += [f"- [{_alt(t or u)}]({u})" for t, u in note.answer_links]
+                lines += [""]
         if (note.explanation or "").strip():
             lines += ["**Explained simply**", "", note.explanation.strip(), ""]
         if (note.slide_text or "").strip():

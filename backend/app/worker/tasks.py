@@ -2867,10 +2867,20 @@ def transcribe_study_note(note_id: str) -> dict[str, str]:
             study_crud.complete_sync(
                 session, note_id=nid, text=(result.text or "").strip()
             )
+            queued = False
             if study_crud.enrich_wanted(study_session):
                 # Durable follow-up: title, tidy text, terms, slide text.
                 study_crud.queue_enrich_sync(session, note)
-                session.commit()
+                queued = True
+            if "question" in (note.tags or []):
+                if note.status != "ready":
+                    note.answer_status, note.answer_error = "failed", "no_speech"
+                elif study_crud.answer_wanted(note):
+                    # A question was marked: find it and suggest an answer.
+                    study_crud.queue_answer_sync(session, note)
+                    queued = True
+            session.commit()
+            if queued:
                 _nudge_outbox()
             obj = audio_object_crud.get_by_key_sync(session, note.audio_key)
             if obj is not None:
@@ -2959,5 +2969,138 @@ def enrich_study_note(note_id: str) -> dict[str, str]:
             if note is not None:
                 note.enrich_status = "failed"
                 note.enrich_error = f"{type(exc).__name__}: {exc}"[:2000]
+                session.commit()
+            raise
+
+
+@celery_app.task(
+    name="tasks.answer_study_question", soft_time_limit=1500, time_limit=1560
+)
+def answer_study_question(note_id: str) -> dict[str, str]:
+    """Find the question in a note marked "question" and suggest an answer.
+
+    1. The model picks the question out of what was said and gives a first
+       short answer; both are stored at once, so the person in the meeting
+       sees something within seconds.
+    2. The workspace is searched (earlier recordings the owner may read, and
+       the owner's notes).
+    3. If the session allows it and web search is set up, an agent researches
+       the question on the web. It is given the question only.
+    4. The final answer is written from those findings.
+
+    A step that fails leaves the earlier results in place.
+    """
+    from app.crud import study as study_crud
+    from app.models.study import StudyNote, StudyNotebook, StudySession
+    from app.models.user import User
+    from app.services import study_answer
+    from app.services.agent_runner import AgentRunError, get_agent_runner
+
+    nid = uuid.UUID(note_id)
+    with session_scope() as session:
+        if not study_crud.claim_answer_sync(session, note_id=nid):
+            return {"status": "skipped", "reason": "not_pending"}
+        note = session.get(StudyNote, nid)
+        runner = get_agent_runner()
+        try:
+            if not (note.text or "").strip():
+                note.answer_status, note.answer_error = "failed", "no_speech"
+                session.commit()
+                return {"status": "failed"}
+            # 1. The question, and a first answer.
+            try:
+                extracted = study_answer.parse_extract(
+                    runner.chat_sync(
+                        instructions=study_answer.EXTRACT_INSTRUCTIONS,
+                        text=study_answer.build_extract_input(
+                            text=note.text, slide_text=note.slide_text
+                        ),
+                    ).text
+                )
+            except (AgentRunError, ValueError) as exc:
+                note.answer_status = "failed"
+                note.answer_error = str(exc)[:2000]
+                session.commit()
+                return {"status": "failed"}
+            if not extracted.question:
+                note.answer_status, note.answer_error = "failed", "no_question"
+                session.commit()
+                return {"status": "failed"}
+            note.question = extracted.question
+            note.answer_short = extracted.answer
+            note.answer = None
+            note.answer_sources = None
+            session.commit()  # shown while the rest is worked on
+
+            notebook = session.get(StudyNotebook, note.notebook_id)
+            study_session = session.get(StudySession, note.session_id)
+            owner = session.get(User, notebook.owner_id) if notebook else None
+            problems: list[str] = []
+            # 2. The workspace.
+            findings = (
+                study_answer.search_workspace(
+                    session,
+                    user=owner,
+                    workspace_id=notebook.workspace_id,
+                    terms=extracted.terms,
+                    exclude_note_id=note.id,
+                    exclude_recording_id=(
+                        study_session.recording_id if study_session else None
+                    ),
+                )
+                if owner is not None
+                else []
+            )
+            # 3. The web: only the question leaves the installation.
+            web_text: str | None = None
+            web_sources: list[dict] = []
+            if (
+                study_session is not None
+                and study_session.research_web
+                and settings.WEB_SEARCH_ENABLED
+            ):
+                try:
+                    researched = runner.research_sync(question=extracted.question)
+                    web_text = researched.text
+                    web_sources = study_answer.web_sources(list(researched.sources))
+                except AgentRunError as exc:
+                    problems.append(f"Web research: {exc}")
+            # 4. The answer.
+            if findings or web_text:
+                try:
+                    short, full = study_answer.parse_compose(
+                        runner.chat_sync(
+                            instructions=study_answer.COMPOSE_INSTRUCTIONS,
+                            text=study_answer.build_compose_input(
+                                question=extracted.question,
+                                findings=findings,
+                                web=web_text,
+                            ),
+                        ).text
+                    )
+                    note.answer_short = short or note.answer_short
+                    note.answer = full
+                except (AgentRunError, ValueError) as exc:
+                    problems.append(f"Answer: {exc}")
+                    # The research itself is still worth showing.
+                    note.answer = web_text
+            note.answer_sources = [
+                *[
+                    finding.source(f"S{number}")
+                    for number, finding in enumerate(findings, start=1)
+                ],
+                *web_sources,
+            ] or None
+            note.answer_status = "ready"
+            note.answer_error = " ".join(problems)[:2000] or None
+            session.commit()
+            return {"status": "ready"}
+        except Exception as exc:
+            logger.exception("answer_study_question: note %s failed", note_id)
+            session.rollback()
+            note = session.get(StudyNote, nid)
+            if note is not None:
+                note.answer_status = "failed"
+                note.answer_error = f"{type(exc).__name__}: {exc}"[:2000]
                 session.commit()
             raise

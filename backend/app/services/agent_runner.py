@@ -26,6 +26,8 @@ class AgentRunError(RuntimeError):
 class AgentAnswer:
     text: str
     model: str | None = None
+    # /research only: the pages the search tool returned ({"title", "url"}).
+    sources: tuple[dict, ...] = ()
 
 
 class AgentRunner:
@@ -116,6 +118,39 @@ class AgentRunner:
         if not answer:
             raise AgentRunError("The model returned an empty answer.")
         return AgentAnswer(text=answer, model=data.get("model") or None)
+
+    def research_sync(self, *, question: str, timeout: float = 300) -> AgentAnswer:
+        """Research one question on the web (an agent with a search tool).
+        Only the question is sent. Raises :class:`AgentRunError`."""
+        try:
+            with log_operation(logger, "agent.research", chars=len(question)):
+                response = httpx.post(
+                    f"{settings.AGENT_RUNNER_URL.rstrip('/')}/research",
+                    json={"question": question, "timeout_seconds": timeout},
+                    timeout=httpx.Timeout(timeout + 30, connect=10),
+                )
+        except httpx.HTTPError as exc:
+            raise AgentRunError(
+                f"The agent service could not be reached ({type(exc).__name__})."
+            ) from None
+        if response.status_code != 200:
+            raise AgentRunError(
+                f"The agent service answered HTTP {response.status_code}."
+            )
+        data = response.json()
+        if data.get("error"):
+            raise AgentRunError(str(data["error"])[:1500])
+        answer = str(data.get("answer") or "").strip()
+        if not answer:
+            raise AgentRunError("The agent returned an empty answer.")
+        sources = data.get("sources")
+        return AgentAnswer(
+            text=answer,
+            model=data.get("model") or None,
+            sources=tuple(s for s in sources if isinstance(s, dict))
+            if isinstance(sources, list)
+            else (),
+        )
 
 
 _runner: AgentRunner | None = None

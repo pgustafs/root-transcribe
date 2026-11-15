@@ -515,6 +515,43 @@ describe("study note controller", () => {
     // Frames that were looked at and not kept are let go.
     expect(t.released()).toBeGreaterThan(5);
   });
+
+  it("keeps a minute for a question, as a note of its own", async () => {
+    const t = await setup("until_stopped");
+    t.buffer?.append(ramp(0, 9000)); // 90 seconds of talk
+    t.setClock(90_000);
+    // A note is open; the question does not end or change it.
+    await t.controller.toggle();
+    expect(t.status().openSinceMs).toBe(90_000);
+    t.buffer?.append(ramp(9000, 500));
+    t.setClock(95_000);
+    const asked = await t.controller.question({ thought: "From Anna" });
+    expect(asked).toMatchObject({
+      outcome: "saved",
+      captured_ms: 95_000,
+      // One minute back, not the usual 15 seconds.
+      audio_start_ms: 35_000,
+      audio_end_ms: 95_000,
+    });
+    expect(t.status().openSinceMs).toBe(90_000);
+    await vi.waitFor(() => expect(t.backend.notes.size).toBe(1));
+    const [[id, sent]] = [...t.backend.notes.entries()] as [
+      string,
+      { tags: string[]; comment: string },
+    ][];
+    expect(sent).toMatchObject({ tags: ["question"], comment: "From Anna" });
+    // Its answer is what the recorder shows next.
+    expect(t.status().questionNoteId).toBe(id);
+    t.controller.dismissQuestion();
+    expect(t.status().questionNoteId).toBeNull();
+    // An ordinary note still gets 15 seconds.
+    await t.controller.toggle();
+    await vi.waitFor(() => expect(t.backend.notes.size).toBe(2));
+    const plain = [...t.backend.notes.values()][1] as {
+      audioStartMs: number;
+    };
+    expect(plain.audioStartMs).toBe(75_000);
+  });
 });
 
 describe("slide detector", () => {

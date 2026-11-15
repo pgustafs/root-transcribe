@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Progress } from "@/components/ui/progress";
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert } from "@/components/Alert";
@@ -24,6 +25,8 @@ export type StudyDockProps = {
   actions: NoteCaptureActions;
   onViewNotes: () => void;
   onChangeSource: () => void;
+  /** The answer card of a marked question, when there is one. */
+  answer?: ReactNode;
   /** The floating Take note window; absent where the browser has none. */
   floating?: { isOpen: boolean; onToggle: () => void };
 };
@@ -239,6 +242,7 @@ export function RecordingDock({
           </span>
         </div>
       )}
+      {study?.answer}
       {showLevel && (
         <div>
           <Progress

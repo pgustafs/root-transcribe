@@ -29,6 +29,7 @@ import { ConfirmDeleteModal } from "@/components/ConfirmDeleteModal";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { SearchInput } from "@/components/SearchInput";
+import { QuestionBlock } from "@/components/study/QuestionAnswer";
 import {
   Glossary,
   KeyTerms,
@@ -73,6 +74,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   useDeleteNote,
+  useAnswerNote,
   useDeleteNotebook,
   useEnrichNote,
   useNotebook,
@@ -346,6 +348,8 @@ function NoteEntry({
   const [original, setOriginal] = useState(false);
   const setTags = useSetNoteTags(workspaceId, notebookId);
   const enrich = useEnrichNote(workspaceId, notebookId);
+  const findAnswer = useAnswerNote(workspaceId, notebookId);
+  const isQuestion = (note.tags ?? []).includes("question");
   const at = noteClock(note.captured_ms);
   const working = note.status === "pending" || note.status === "processing";
   const improving =
@@ -553,6 +557,14 @@ function NoteEntry({
             </form>
           )}
 
+          {isQuestion && (
+            <QuestionBlock
+              workspaceId={workspaceId}
+              note={note}
+              canRetry={canEnrich}
+              onRetry={() => findAnswer.mutate(note.id)}
+            />
+          )}
           {improving && (
             <p className="flex items-center gap-2 text-sm" role="status">
               <Spinner aria-hidden="true" />

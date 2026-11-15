@@ -40,6 +40,7 @@ import type {
 import {
   encodeWav,
   NOTE_SAMPLE_RATE,
+  QUESTION_LOOKBACK_SECONDS,
   samplesToMs,
   TabAudioBuffer,
 } from "@/lib/study/tabAudio";
@@ -107,6 +108,8 @@ export type StudyStatus = {
   openTags: NoteTag[];
   /** A slide just went away and can still be kept as a note. */
   offer: { id: string; capturedMs: number } | null;
+  /** The note of the question that was marked last (its answer is shown). */
+  questionNoteId: string | null;
   /** Notes taken in this recording. */
   count: number;
   /** Notes not yet confirmed by the server. */
@@ -129,6 +132,7 @@ export const IDLE_STUDY: StudyStatus = {
   openSinceMs: null,
   openTags: [],
   offer: null,
+  questionNoteId: null,
   count: 0,
   waiting: 0,
   audioAvailable: false,
@@ -148,6 +152,8 @@ export type BeginOptions = {
   enrich?: boolean;
   /** Offer to keep a slide when it changes. */
   offerSlides?: boolean;
+  /** Questions may be researched on the web. */
+  researchWeb?: boolean;
 };
 
 export type ControllerDeps = {
@@ -280,6 +286,7 @@ async function ensureServerSession(
     language: session.language,
     mode: session.mode,
     enrich: session.enrich ?? true,
+    research_web: session.researchWeb ?? false,
     started_at: session.startedAt,
   });
   knownSessions.add(session.id);
@@ -561,6 +568,7 @@ export class StudyNoteController {
         startedAt: new Date().toISOString(),
         enrich: options.enrich ?? true,
         offerSlides: options.offerSlides ?? false,
+        researchWeb: options.researchWeb ?? false,
         localRecordingId: options.localRecordingId,
         recordingId: null,
         linked: false,
@@ -641,6 +649,19 @@ export class StudyNoteController {
     return this.act({ kind: "thought", thought });
   }
 
+  /**
+   * Somebody just asked a question. Always a note of its own, complete at
+   * once, with the last minute of talk (an open note is left as it is).
+   */
+  question(extra: PressExtra = {}): Promise<PressResult> {
+    return this.act({ kind: "question", thought: extra.thought });
+  }
+
+  /** The answer card was closed. */
+  dismissQuestion(): void {
+    if (this.status.questionNoteId) this.set({ questionNoteId: null });
+  }
+
   /** Stop the open note. */
   stopNote(): Promise<void> {
     return this.serialized(async () => {
@@ -649,7 +670,7 @@ export class StudyNoteController {
   }
 
   private async act(action: {
-    kind: "press" | "mark" | "thought";
+    kind: "press" | "mark" | "thought" | "question";
     tag?: NoteTag;
     thought?: string;
   }): Promise<PressResult> {
@@ -670,12 +691,18 @@ export class StudyNoteController {
 
   /** Runs inside the queue. Returns the rest of the work as a promise. */
   private async decide(action: {
-    kind: "press" | "mark" | "thought";
+    kind: "press" | "mark" | "thought" | "question";
     tag?: NoteTag;
     thought?: string;
   }): Promise<Promise<PressResult> | PressResult> {
     if (!this.session || !this.source)
       return { outcome: "error", reason: "not_recording" };
+    if (action.kind === "question") {
+      if (this.deps.isPaused()) return { outcome: "error", reason: "paused" };
+      if (!this.source.hasVideo || !this.source.isLive())
+        return { outcome: "error", reason: "sharing_lost" };
+      return this.captureQuestion((action.thought ?? "").trim());
+    }
     const open = this.open;
     if (open) {
       open.comment = joinThought(open.comment, action.thought);
@@ -822,6 +849,45 @@ export class StudyNoteController {
     }
     // One complete note per press ("Last 15 seconds only"), or no tab audio.
     return this.storeComplete(base, pinned, crop, lookback, capturedMs);
+  }
+
+  /** A question: the frame now and up to a minute of what was just said. */
+  private async captureQuestion(
+    comment: string,
+  ): Promise<Promise<PressResult>> {
+    const session = this.session as StoredStudySession;
+    const source = this.source as CaptureSource;
+    const capturedMs = Math.max(0, Math.round(this.deps.clock()));
+    const id = this.newId();
+    const pinning = source.grab();
+    const lookback = source.buffer?.lookback(QUESTION_LOOKBACK_SECONDS) ?? null;
+    const rate = source.buffer?.sampleRate ?? NOTE_SAMPLE_RATE;
+    const pinned = await pinning;
+    const seq = await store.takeSeq(session.id);
+    const base: StoredNote = {
+      id,
+      sessionId: session.id,
+      workspaceId: session.workspaceId,
+      notebookId: session.notebookId,
+      seq,
+      capturedMs,
+      audioStartMs: Math.max(
+        0,
+        capturedMs - samplesToMs(lookback?.length ?? 0, rate),
+      ),
+      audioEndMs: null,
+      sampleRate: rate,
+      image: null,
+      audio: null,
+      hasAudio: false,
+      state: "open",
+      endReason: null,
+      tags: ["question"],
+      comment: comment || null,
+      createdAt: Date.now(),
+    };
+    this.set({ questionNoteId: id });
+    return this.storeComplete(base, pinned, session.crop, lookback, capturedMs);
   }
 
   /** Encode and store a note that is complete at once. */
