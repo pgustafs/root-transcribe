@@ -39,7 +39,6 @@ _SECRET_HINTS = (
     "api_key",
     "apikey",
     "authorization",
-    "hotkey",
 )
 _MAX_VALUE = 120
 _MAX_SUMMARY = 1000

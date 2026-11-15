@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import type { RecordingLanguage } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,8 @@ import { meetingKeys } from "@/hooks/useMeetings";
 import { useMediaRecorder } from "@/hooks/useMediaRecorder";
 import { useNavigate } from "react-router-dom";
 import { ChangeSourceDialog } from "@/components/study/ChangeSourceDialog";
-import { MacShortcutSetup } from "@/components/study/MacShortcutSetup";
+import { useFloatingWindow } from "@/hooks/useFloatingWindow";
+import { FloatingNotePanel } from "@/components/study/FloatingNotePanel";
 import type { Crop } from "@/lib/study/frame";
 import {
   discardStudySessions,
@@ -120,6 +122,8 @@ type RecordingContextValue = {
   studyPreview: () => Promise<Blob>;
   studyCrop: () => Crop;
   setStudyCrop: (crop: Crop) => Promise<void>;
+  /** Open the floating Take note window (call from a click). */
+  openStudyFloat: () => void;
 };
 
 const RecordingContext = createContext<RecordingContextValue | null>(null);
@@ -198,7 +202,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation(["meetings", "common", "study"]);
   const recorder = useMediaRecorder();
   const navigate = useNavigate();
-  // Study notes: one controller for the dock button and the Mac shortcut.
+  // Study notes: one controller for the dock button and the floating window.
   const [study, setStudy] = useState<StudyStatus>(IDLE_STUDY);
   const recorderRef = useRef(recorder);
   recorderRef.current = recorder;
@@ -211,7 +215,17 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     });
   }
   const studyController = studyRef.current;
-  const [shortcutSetupOpen, setShortcutSetupOpen] = useState(false);
+  const floating = useFloatingWindow({
+    title: t("study:dock.takeNote"),
+    width: 280,
+    height: 132,
+  });
+  const closeFloating = floating.close;
+  const openFloating = floating.open;
+  useEffect(() => {
+    // No notes can be taken any more: the floating button goes away.
+    if (!study.active) closeFloating();
+  }, [study.active, closeFloating]);
   const [changingSource, setChangingSource] = useState(false);
   useEffect(() => {
     // Notes left behind by a reload or a crash are finished and sent.
@@ -1232,10 +1246,12 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       studyPreview: () => studyController.previewFrame(),
       studyCrop: () => studyController.crop,
       setStudyCrop: (crop: Crop) => studyController.setCrop(crop),
+      openStudyFloat: () => void openFloating(),
     }),
     [
       study,
       studyController,
+      openFloating,
       active,
       target?.workspaceId,
       recorder.isSupported,
@@ -1401,7 +1417,15 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
                                     `/workspaces/${study.workspaceId}/study/${study.notebookId}`,
                                   ),
                                 onChangeSource: () => setChangingSource(true),
-                                onSetup: () => setShortcutSetupOpen(true),
+                                floating: floating.supported
+                                  ? {
+                                      isOpen: floating.isOpen,
+                                      onToggle: () =>
+                                        floating.isOpen
+                                          ? floating.close()
+                                          : void floating.open(),
+                                    }
+                                  : undefined,
                               }
                             : undefined
                         }
@@ -1454,13 +1478,18 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {shortcutSetupOpen && (
-        <MacShortcutSetup
-          isOpen={shortcutSetupOpen}
-          onClose={() => setShortcutSetupOpen(false)}
-          lastDelayMs={study.lastDelayMs}
-        />
-      )}
+      {floating.container &&
+        study.active &&
+        createPortal(
+          <FloatingNotePanel
+            status={study}
+            recording={recorder.status === "recording" && !uploading}
+            paused={recorder.status === "paused"}
+            durationMs={recorder.durationMs}
+            onToggle={() => void studyController.toggle()}
+          />,
+          floating.container,
+        )}
       {changingSource && target && (
         <ChangeSourceDialog
           workspaceId={target.workspaceId}

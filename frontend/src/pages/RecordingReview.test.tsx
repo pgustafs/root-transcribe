@@ -310,7 +310,7 @@ it("switches review tabs by keyboard while preserving transcript filters", async
   // Transcript → Notes → Clips
   await actor.keyboard("{ArrowRight}");
   await waitFor(() =>
-    expect(screen.getByRole("tab", { name: "Notes" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute(
       "aria-selected",
       "true",
     ),

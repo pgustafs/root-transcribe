@@ -10,8 +10,6 @@
  * - `notes`: a capture. `open` while audio is still being added, `queued` once
  *   complete, `uploaded` after the server confirmed it (blobs dropped then).
  * - `audio`: an open note's samples in order, written as they arrive.
- * - `invocations`: what each shortcut press did, so a repeated press gets the
- *   first answer instead of acting twice.
  */
 
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
@@ -60,18 +58,7 @@ export type StoredNote = {
   createdAt: number;
 };
 
-export type InvocationResult = {
-  outcome: "started" | "saved" | "error";
-  reason?: string;
-  captured_ms?: number;
-  audio_start_ms?: number | null;
-  audio_end_ms?: number | null;
-  has_audio?: boolean;
-  delay_ms?: number;
-};
-
 type StoredAudio = { noteId: string; index: number; samples: ArrayBuffer };
-type StoredInvocation = { id: string; result: InvocationResult; at: number };
 
 interface StudyDB extends DBSchema {
   sessions: { key: string; value: StoredStudySession };
@@ -85,11 +72,9 @@ interface StudyDB extends DBSchema {
     value: StoredAudio;
     indexes: { byNote: string };
   };
-  invocations: { key: string; value: StoredInvocation };
 }
 
 const DB_NAME = "study-notes";
-const INVOCATION_TTL_MS = 60 * 60 * 1000;
 
 let dbPromise: Promise<IDBPDatabase<StudyDB>> | null = null;
 
@@ -99,16 +84,21 @@ export function isStudyStoreAvailable(): boolean {
 
 function db(): Promise<IDBPDatabase<StudyDB>> {
   if (!dbPromise) {
-    dbPromise = openDB<StudyDB>(DB_NAME, 1, {
-      upgrade(database) {
-        database.createObjectStore("sessions", { keyPath: "id" });
-        const notes = database.createObjectStore("notes", { keyPath: "id" });
-        notes.createIndex("bySession", "sessionId");
-        const audio = database.createObjectStore("audio", {
-          keyPath: ["noteId", "index"],
-        });
-        audio.createIndex("byNote", "noteId");
-        database.createObjectStore("invocations", { keyPath: "id" });
+    dbPromise = openDB<StudyDB>(DB_NAME, 2, {
+      upgrade(database, oldVersion) {
+        if (oldVersion < 1) {
+          database.createObjectStore("sessions", { keyPath: "id" });
+          const notes = database.createObjectStore("notes", { keyPath: "id" });
+          notes.createIndex("bySession", "sessionId");
+          const audio = database.createObjectStore("audio", {
+            keyPath: ["noteId", "index"],
+          });
+          audio.createIndex("byNote", "noteId");
+        }
+        // Version 1 kept answers to keyboard-shortcut presses; that is gone.
+        const names = database.objectStoreNames as unknown as DOMStringList;
+        if (names.contains("invocations"))
+          (database as unknown as IDBDatabase).deleteObjectStore("invocations");
       },
       blocking(_current, _blocked, event) {
         (event.target as IDBDatabase | null)?.close();
@@ -254,29 +244,4 @@ export async function readAudio(noteId: string): Promise<Float32Array[]> {
   return rows
     .sort((a, b) => a.index - b.index)
     .map((row) => new Float32Array(row.samples));
-}
-
-// --- shortcut presses -----------------------------------------------------------
-
-export async function putInvocation(
-  id: string,
-  result: InvocationResult,
-): Promise<void> {
-  const database = await db();
-  const now = Date.now();
-  const tx = database.transaction("invocations", "readwrite");
-  await tx.store.put({ id, result, at: now });
-  // Old answers are of no use to anyone: sweep them while we are here.
-  let cursor = await tx.store.openCursor();
-  while (cursor) {
-    if (now - cursor.value.at > INVOCATION_TTL_MS) await cursor.delete();
-    cursor = await cursor.continue();
-  }
-  await tx.done;
-}
-
-export async function getInvocation(
-  id: string,
-): Promise<InvocationResult | undefined> {
-  return (await (await db()).get("invocations", id))?.result;
 }

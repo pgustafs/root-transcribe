@@ -388,7 +388,15 @@ export function RecordMeetingModal({
         </div>
         <DialogFooter>
           {cropping ? (
-            <Button onClick={onClose} variant="default">
+            <Button
+              onClick={() => {
+                // Still inside the click: the browser allows the floating
+                // Take note window to open now.
+                recording.openStudyFloat();
+                onClose();
+              }}
+              variant="default"
+            >
               {t("study:crop.done")}
             </Button>
           ) : (

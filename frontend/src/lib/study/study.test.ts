@@ -2,7 +2,6 @@ import "fake-indexeddb/auto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseEvents } from "@/lib/study/commandStream";
 import {
   clampCrop,
   cropPixels,
@@ -136,22 +135,6 @@ describe("crop", () => {
   });
 });
 
-describe("command stream", () => {
-  it("parses events across chunk boundaries and skips heartbeats", () => {
-    const first = parseEvents(
-      ': ping\n\nevent: hello\ndata: {"server_ms":5}\n\nevent: comm',
-    );
-    expect(first.events).toEqual([{ event: "hello", data: '{"server_ms":5}' }]);
-    const second = parseEvents(
-      `${first.rest}and\ndata: {"invocation":"a"}\n\n`,
-    );
-    expect(second.events).toEqual([
-      { event: "command", data: '{"invocation":"a"}' },
-    ]);
-    expect(second.rest).toBe("");
-  });
-});
-
 // --- the controller ----------------------------------------------------------
 
 function fakeSource(buffer: TabAudioBuffer | null) {
@@ -205,7 +188,6 @@ function fakeApi() {
       deleteSession: vi.fn(async (_w: string, id: string) => {
         calls.push(`delete:${id}`);
       }),
-      acknowledgeCommand: vi.fn(async () => {}),
     },
   };
 }
@@ -218,7 +200,6 @@ async function setup(mode: store.StudyMode, withAudio = true) {
   let paused = false;
   let status: StudyStatus | null = null;
   let ids = 0;
-  let onCommand: ((command: never, age: number) => void) | null = null;
   const controller = new StudyNoteController({
     clock: () => clock,
     isPaused: () => paused,
@@ -226,11 +207,6 @@ async function setup(mode: store.StudyMode, withAudio = true) {
       status = next;
     },
     createSource: async () => source,
-    openStream: (_id, handlers) => {
-      onCommand = handlers.onCommand as never;
-      handlers.onState?.(true);
-      return () => {};
-    },
     api: backend.api,
     newId: () => `id-${(ids += 1)}`,
   });
@@ -245,7 +221,6 @@ async function setup(mode: store.StudyMode, withAudio = true) {
     },
     {} as MediaStream,
   );
-  await vi.waitFor(() => expect(onCommand).not.toBeNull());
   return {
     controller,
     buffer,
@@ -258,21 +233,7 @@ async function setup(mode: store.StudyMode, withAudio = true) {
       paused = value;
     },
     status: () => status as unknown as StudyStatus,
-    press: async (invocation: string, age = 20) => {
-      onCommand?.(
-        {
-          invocation,
-          action: "toggle",
-          sent_ms: 0,
-          stale_after_ms: 2000,
-        } as never,
-        age,
-      );
-      await vi.waitFor(async () =>
-        expect(await store.getInvocation(invocation)).toBeDefined(),
-      );
-      return (await store.getInvocation(invocation)) as store.InvocationResult;
-    },
+    press: () => controller.toggle(),
   };
 }
 
@@ -291,25 +252,21 @@ describe("study note controller", () => {
     const t = await setup("until_stopped");
     t.buffer?.append(ramp(0, 2700)); // 27 s of tab audio so far
     t.setClock(522_000);
-    const started = await t.press("press-1");
+    const started = await t.press();
     expect(started).toMatchObject({
       outcome: "started",
       captured_ms: 522_000,
       audio_start_ms: 507_000,
     });
     expect(t.status().openSinceMs).toBe(522_000);
-    // The same press again changes nothing.
-    expect(await t.press("press-1")).toEqual(started);
-    expect(t.status().openSinceMs).toBe(522_000);
 
     t.buffer?.append(ramp(2700, 2100)); // 21 more seconds
-    const saved = await t.press("press-2");
+    const saved = await t.press();
     expect(saved).toMatchObject({
       outcome: "saved",
       audio_start_ms: 507_000,
       audio_end_ms: 543_000,
     });
-    expect(await t.press("press-2")).toEqual(saved);
     await vi.waitFor(() => expect(t.backend.notes.size).toBe(1));
     const sent = [...t.backend.notes.values()][0] as {
       seq: number;
@@ -325,14 +282,13 @@ describe("study note controller", () => {
       1,
     );
     await vi.waitFor(() => expect(t.status().count).toBe(1));
-    expect(t.backend.api.acknowledgeCommand).toHaveBeenCalledTimes(4);
   });
 
   it("takes one complete note per press in last-15-seconds mode", async () => {
     const t = await setup("last_15s");
     t.buffer?.append(ramp(0, 500)); // only 5 seconds exist yet
     t.setClock(5_000);
-    const first = await t.press("a");
+    const first = await t.press();
     expect(first).toMatchObject({
       outcome: "saved",
       audio_start_ms: 0,
@@ -340,7 +296,7 @@ describe("study note controller", () => {
     });
     t.buffer?.append(ramp(500, 50));
     t.setClock(5_500);
-    const second = await t.press("b");
+    const second = await t.press();
     expect(second).toMatchObject({ outcome: "saved", audio_start_ms: 0 });
     await vi.waitFor(() => expect(t.backend.notes.size).toBe(2));
     const seqs = [...t.backend.notes.values()].map(
@@ -350,15 +306,11 @@ describe("study note controller", () => {
     expect(t.status().openSinceMs).toBeNull();
   });
 
-  it("drops a press that arrives too late, and refuses while paused", async () => {
+  it("refuses a press while paused and keeps earlier audio out afterwards", async () => {
     const t = await setup("last_15s");
-    expect(await t.press("late", 3000)).toEqual({
-      outcome: "error",
-      reason: "stale",
-    });
     t.setPaused(true);
     await t.controller.pause();
-    expect(await t.press("paused")).toEqual({
+    expect(await t.press()).toEqual({
       outcome: "error",
       reason: "paused",
     });
@@ -369,7 +321,7 @@ describe("study note controller", () => {
     await t.controller.resume();
     t.buffer?.append(ramp(9000, 100));
     t.setClock(60_000);
-    const after = await t.press("resumed");
+    const after = await t.press();
     expect(after).toMatchObject({
       audio_start_ms: 59_000,
       audio_end_ms: 60_000,
@@ -397,7 +349,7 @@ describe("study note controller", () => {
     );
     expect(reasons.sort()).toEqual(["paused", "sharing_lost"]);
     // No frame can be taken any more: the press says why.
-    expect(await t.press("gone")).toEqual({
+    expect(await t.press()).toEqual({
       outcome: "error",
       reason: "sharing_lost",
     });

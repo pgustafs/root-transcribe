@@ -24,7 +24,7 @@ results as documents or subtitles.
   audio retention, legal holds, speaker erasure and data-subject exports.
 - Meeting notes written by agents from the transcript (summary, task list and your
   own), editable in the app and exportable as Markdown, Word and PDF. Optional:
-  needs a second, text model. See [Meeting notes](#meeting-notes-written-by-agents).
+  needs a second, text model. See [Meeting notes](#documents-written-by-agents).
 - Keycloak sign-in, local account suspension, notifications and worker job status.
 - English and Swedish interfaces, light/dark themes, structured logs and metrics.
 - Auto / English / Swedish recording language, preserved through recovery and retries.
@@ -54,7 +54,7 @@ required repository access.
 **Meeting notes are optional and need a second model**: an OpenAI-compatible
 LLM server (for example another vLLM instance) reachable from the containers,
 with a context window of 32,000 tokens or more. Without one the app runs as a
-transcription tool. See [Meeting notes](#meeting-notes-written-by-agents).
+transcription tool. See [Meeting notes](#documents-written-by-agents).
 
 Speech-to-text is remote. The application does not start a Whisper server.
 Diarization and speaker embeddings run in the dedicated transcription worker.
@@ -346,7 +346,7 @@ the address of an OpenAI-compatible speech-to-text server.
 ./deploy/mac.sh http://my-stt-host:8002/v1
 ```
 
-To also get [meeting notes](#meeting-notes-written-by-agents), add the address of
+To also get [meeting notes](#documents-written-by-agents), add the address of
 an OpenAI-compatible LLM server as a second input:
 
 ```sh
@@ -675,11 +675,11 @@ Deployment structure follows [Podman's kube-play documentation](https://docs.pod
 ConfigMaps for configuration/import files, Secrets for credentials, and named
 persistent volumes for data.
 
-## Meeting notes written by agents
+## Documents written by agents
 
-With a second model configured, a finished recording gets a **Notes** tab. An
+With a second model configured, a finished recording gets a **Documents** tab. An
 agent reads the transcript (with speaker names and times) and writes a document:
-the built-in agents are **Summary** and **Task list**. Each note can be edited
+the built-in agents are **Summary** and **Task list**. Each document can be edited
 in the app (Markdown, with preview), restored to what the agent wrote, copied,
 and exported as Markdown, Word or PDF. Long meetings are processed in parts and
 merged.
@@ -690,10 +690,10 @@ merged.
   them and change their instructions. The built-in ones can be edited, switched
   off and reset to their default, but not deleted.
 - *My agents* are personal: any user can add their own, and only they see and
-  run them. A note is visible to everyone who can read the transcript, whichever
+  run them. A document is visible to everyone who can read the transcript, whichever
   agent wrote it.
 
-A change to an agent applies the next time it runs; notes already written keep
+A change to an agent applies the next time it runs; documents already written keep
 their text.
 
 **Setup.** The agents run on the [CUGA](https://github.com/cuga-project/cuga-agent)
@@ -745,22 +745,26 @@ Things to know:
 - Quality depends on the model. The feature has been tested end to end with a
   stand-in model only; try it with yours before relying on it.
 
-## Study notes with a Mac keyboard shortcut
+## Notebooks: take notes while recording
 
-While you record a browser tab (a lecture, a course video), **Take note** saves
+While you record a browser tab (a lecture, a course video, a video meeting), **Take note** saves
 the frame that is showing together with the speech around it. All notes for one
 video collect in one notebook, which exports as Markdown with its images.
 Chrome or Edge on a desktop is needed (tab audio, frame capture).
 
 1. In a workspace choose **Record audio**, tick *Also capture another tab*,
-   and turn on **Take study notes**. Paste the video's link (a YouTube link in
+   and turn on **Take notes**. Paste the video's link (a YouTube link in
    any form always opens the same notebook), or pick an existing notebook, or
    name a new one. The full recording is saved as before.
 2. Pick the tab in the browser's share dialog, with *Also share tab audio* on.
    The app then shows the shared tab once: keep the whole frame, or select the
    video area to leave out comments and recommendations. A video in fullscreen
    needs no cropping.
-3. Press **Take note** in the recording bar, or your Mac shortcut.
+3. Press **Take note**. When you choose **Done** in the previous step, a small
+   floating window with that button opens and stays above the tab you are
+   watching, so you need not switch back to Root Transcribe. The same button
+   is in the recording bar, where **Show floating button** opens the window
+   again if you closed it.
    - *Until stopped* (default): the first press saves the frame and up to 15
      seconds of tab audio before it; the next press ends the note. Playback
      and the recording continue.
@@ -768,8 +772,11 @@ Chrome or Edge on a desktop is needed (tab audio, frame capture).
    Only the tab's own audio is used for notes, never the microphone.
 4. **View notes** opens the notebook. Each entry shows its image at once and
    says what state its text is in (Transcribing…, Ready, No speech detected,
-   Transcription failed · Retry, Screenshot only). **Export Markdown** downloads
-   a ZIP with one `.md` file and an `images/` folder.
+   Transcription failed · Retry, Screenshot only). Under **My thoughts** you
+   can write your own words on each note; they are saved when you leave the
+   field and are kept apart from the transcribed text. **Export Markdown**
+   downloads a ZIP with one `.md` file and an `images/` folder; the transcript
+   is a quote and your thoughts follow under their own heading.
 
 Good to know: pausing the recording ends an open note, and nothing from before
 the pause reaches a later note. If the tab moves on to another video, use
@@ -780,43 +787,9 @@ recording" (the recorder's clock); a link to the exact moment in the video is
 only added when you paste the player's *Copy video URL at current time* link
 on an entry.
 
-### Set up the Mac shortcut (once)
-
-Open **Set up Mac shortcut** in the recording bar. It shows the address for
-your installation and creates your shortcut key. The key is shown once, only
-its hash is stored, and all it can do is start or stop a note in your own
-running recording. *Create a new key* replaces it; *Revoke key* removes it.
-
-In the Shortcuts app create a shortcut "Take note" with these actions:
-
-1. **Current Date**, then **Format Date** with the custom format
-   `yyyyMMddHHmmssSSS`. This marks the press, so a repeated request never
-   takes a second note.
-2. **Get Contents of URL**
-   - URL: `<your app address>/api/v1/study/hotkey` (shown in the dialog)
-   - Method: `POST`
-   - Header `Authorization`: `Bearer rtk_…` (your key)
-   - Header `X-Invocation-Id`: the *Formatted Date* from step 1
-3. **Show Notification** with *Contents of URL*. It reads for example
-   `Note started · 08:42`, `Note saved · 08:27–09:03`, or says why nothing was
-   taken (no recording running, recording paused, tab no longer shared).
-
-In the shortcut's details (ⓘ) choose **Add Keyboard Shortcut** and press a free
-combination, for example Control–Option–N. To test without taking a note, post
-the same way to `…/api/v1/study/hotkey/test`: it answers
-`Connected as <you>. Recorder: ready.` or `not running`.
-
-If Shortcuts refuses a plain `http://localhost` address, use the action **Run
-Shell Script** instead:
-
-```sh
-curl -sS -X POST -H "Authorization: Bearer rtk_…" \
-  -H "X-Invocation-Id: $(date +%s%N)" "http://localhost:8095/api/v1/study/hotkey"
-```
-
-The answer comes when the note is safely stored in the browser, which for a
-large frame can take a second or two; the frame and audio themselves are taken
-at the press. The dialog shows the measured time from key press to frame.
+The floating window needs Chrome or Edge 116 or later. It is a window of its
+own, so it is never part of a saved frame. With the window focused, Space or
+Enter presses the button.
 
 ## Measure transcription quality
 

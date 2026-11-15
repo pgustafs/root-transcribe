@@ -116,7 +116,7 @@ it("lets any user add a personal agent but only read shared ones", async () => {
   // A normal user sees the shared agent but cannot switch it or add shared ones.
   expect(
     screen.getByRole("switch", {
-      name: "Summary is available when creating notes",
+      name: "Summary is available when creating documents",
     }),
   ).toBeDisabled();
   expect(
@@ -187,7 +187,7 @@ it("lets a power user edit, switch off and reset a shared built-in", async () =>
   expect(await screen.findByText("Changed from default")).toBeVisible();
   await actor.click(
     screen.getByRole("switch", {
-      name: "Summary is available when creating notes",
+      name: "Summary is available when creating documents",
     }),
   );
   await waitFor(() => expect(patches).toEqual([{ is_active: false }]));

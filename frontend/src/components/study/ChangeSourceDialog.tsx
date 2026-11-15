@@ -66,7 +66,7 @@ export function ChangeSourceDialog({
         workspaceId,
         choice,
         notebooks.data ?? [],
-        t("study:title"),
+        t("study:page.defaultNotebook"),
       );
       const changed = await onChange({
         notebookId: notebook.id,
@@ -112,7 +112,7 @@ export function ChangeSourceDialog({
               choice={choice}
               onChange={setChoice}
               notebooks={notebooks.data ?? []}
-              suggestedTitle={t("study:title")}
+              suggestedTitle={t("study:page.defaultNotebook")}
             />
           </FieldGroup>
         )}

@@ -1,4 +1,4 @@
-/** Study notes API: notebooks, sessions, captures and the keyboard shortcut. */
+/** Study notes API: notebooks, sessions and captures. */
 
 import { apiClient } from "@/api/client";
 
@@ -45,6 +45,8 @@ export type StudyNote = {
   status: StudyNoteStatus;
   text: string | null;
   error: string | null;
+  /** The owner's own words, apart from the transcript. */
+  comment: string | null;
   end_reason: string | null;
   source_time_url: string | null;
   created_at: string;
@@ -53,15 +55,6 @@ export type StudyNote = {
 export type StudyNotebookDetail = StudyNotebook & {
   sessions: StudySession[];
   notes: StudyNote[];
-};
-
-export type HotkeyCredential = {
-  exists: boolean;
-  hint: string | null;
-  created_at: string | null;
-  last_used_at: string | null;
-  /** Only in the answer to "create". */
-  token: string | null;
 };
 
 const base = (workspaceId: string) => `/workspaces/${workspaceId}/study`;
@@ -227,6 +220,18 @@ export async function setNoteSourceTime(
   return data;
 }
 
+export async function setNoteComment(
+  workspaceId: string,
+  noteId: string,
+  comment: string,
+): Promise<StudyNote> {
+  const { data } = await apiClient.patch<StudyNote>(
+    `${base(workspaceId)}/notes/${noteId}`,
+    { comment },
+  );
+  return data;
+}
+
 export async function deleteNote(
   workspaceId: string,
   noteId: string,
@@ -243,52 +248,4 @@ export async function getNoteImage(
     { responseType: "blob" },
   );
   return data;
-}
-
-export async function getHotkeyCredential(): Promise<HotkeyCredential> {
-  const { data } = await apiClient.get<HotkeyCredential>(
-    "/study/hotkey/credential",
-  );
-  return data;
-}
-
-export async function createHotkeyCredential(): Promise<HotkeyCredential> {
-  const { data } = await apiClient.post<HotkeyCredential>(
-    "/study/hotkey/credential",
-  );
-  return data;
-}
-
-export async function revokeHotkeyCredential(): Promise<void> {
-  await apiClient.delete("/study/hotkey/credential");
-}
-
-/** Press or test the shortcut from the page (what the Mac shortcut sends). */
-export async function sendHotkey(
-  token: string,
-  kind: "press" | "test",
-): Promise<{ ok: boolean; text: string }> {
-  const prefix = apiClient.defaults.baseURL ?? "/api/v1";
-  const response = await fetch(
-    `${prefix}/study/hotkey${kind === "test" ? "/test" : ""}`,
-    { method: "POST", headers: { Authorization: `Bearer ${token}` } },
-  );
-  return { ok: response.ok, text: (await response.text()).trim() };
-}
-
-export async function acknowledgeCommand(
-  invocation: string,
-  result: Record<string, unknown>,
-): Promise<void> {
-  await apiClient.post(
-    `/study/commands/${encodeURIComponent(invocation)}/ack`,
-    result,
-  );
-}
-
-/** The address the keyboard shortcut posts to, as this browser reaches the app. */
-export function hotkeyUrl(kind: "press" | "test" = "press"): string {
-  const prefix = apiClient.defaults.baseURL ?? "/api/v1";
-  const absolute = new URL(prefix, window.location.origin).toString();
-  return `${absolute.replace(/\/$/, "")}/study/hotkey${kind === "test" ? "/test" : ""}`;
 }

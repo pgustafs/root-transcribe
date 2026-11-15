@@ -8,8 +8,6 @@
 * ``StudyNote`` — one capture: a PNG frame and the transcript of a short piece
   of tab audio. The id is made by the browser too, so a repeated upload is the
   same note.
-* ``HotkeyCredential`` — lets a keyboard shortcut on the learner's computer
-  trigger "take note" in their running recorder. Only its hash is stored.
 """
 
 from __future__ import annotations
@@ -126,6 +124,8 @@ class StudyNote(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # The owner's own words about this note, kept apart from the transcript.
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Why a note that was still open ended (paused, stopped, source_changed,
     # sharing_lost). NULL = the learner stopped it.
     end_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
@@ -138,27 +138,4 @@ class StudyNote(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
-    )
-
-
-class HotkeyCredential(Base):
-    __tablename__ = "hotkey_credential"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
-    )
-    # SHA-256 of the secret; the secret itself is shown once and never stored.
-    token_hash: Mapped[str] = mapped_column(
-        String(64), unique=True, index=True, nullable=False
-    )
-    # Last four characters, so the owner can tell which secret is active.
-    hint: Mapped[str] = mapped_column(String(8), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_now, nullable=False
-    )
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
     )

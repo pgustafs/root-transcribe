@@ -13,10 +13,9 @@ import {
   type StudyDockProps,
 } from "@/components/recording/RecordingDock";
 import { RecordingProvider } from "@/components/recording/RecordingProvider";
-import { MacShortcutSetup } from "@/components/study/MacShortcutSetup";
+import { FloatingNotePanel } from "@/components/study/FloatingNotePanel";
 import { StudyCropStep } from "@/components/study/StudyCropStep";
 import { ToastProvider } from "@/components/toast/ToastProvider";
-import { writeShortcutHint } from "@/hooks/useStudy";
 import i18n from "@/i18n";
 import { IDLE_STUDY, type StudyStatus } from "@/lib/study/noteController";
 import { StudyNotesPage } from "@/pages/StudyNotesPage";
@@ -41,7 +40,6 @@ function wrap(ui: ReactNode, route = "/") {
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");
-  writeShortcutHint("");
   server.use(
     http.get(`${API}/workspaces/:id`, () =>
       HttpResponse.json({ id: "w1", name: "Course", description: null }),
@@ -67,7 +65,6 @@ function dock(
     onToggle: vi.fn(),
     onViewNotes: vi.fn(),
     onChangeSource: vi.fn(),
-    onSetup: vi.fn(),
     ...over,
   };
   wrap(
@@ -101,16 +98,24 @@ it("dock: takes a note and keeps the recording controls", async () => {
   expect(screen.getByRole("button", { name: "View 3 notes" })).toBeEnabled();
   for (const name of ["Pause", "Stop & transcribe", "Cancel", "Change source"])
     expect(screen.getByRole("button", { name })).toBeEnabled();
-  // No key hint until the learner says which keys they chose.
-  expect(screen.queryByText("⌃⌥N")).not.toBeInTheDocument();
+  // Where the browser has no floating windows, the button is not offered.
+  expect(
+    screen.queryByRole("button", { name: "Show floating button" }),
+  ).not.toBeInTheDocument();
 });
 
-it("dock: shows the open note's length and the chosen keys", () => {
-  writeShortcutHint("⌃⌥N");
-  dock({ openSinceMs: 522_000, count: 1 });
+it("dock: shows the open note's length and opens the floating button", async () => {
+  const onToggle = vi.fn();
+  dock(
+    { openSinceMs: 522_000, count: 1 },
+    { floating: { isOpen: false, onToggle } },
+  );
   expect(screen.getByRole("button", { name: "Stop note" })).toBeEnabled();
   expect(screen.getByText("Capturing note · 00:21")).toBeInTheDocument();
-  expect(screen.getByText("⌃⌥N")).toBeInTheDocument();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Show floating button" }),
+  );
+  expect(onToggle).toHaveBeenCalledOnce();
 });
 
 it("dock: explains why no note can be taken", () => {
@@ -130,67 +135,49 @@ it("dock: says when notes are screenshots only", () => {
   expect(screen.getByText(/Also share tab audio/)).toBeInTheDocument();
 });
 
-// --- shortcut setup -------------------------------------------------------------
+// --- the floating window --------------------------------------------------------
 
-it("shortcut setup: creates a key, shows the exact request and tests it", async () => {
-  let exists = false;
-  server.use(
-    http.get(`${API}/study/hotkey/credential`, () =>
-      HttpResponse.json({
-        exists,
-        hint: exists ? "9xYz" : null,
-        created_at: null,
-        last_used_at: null,
-        token: null,
-      }),
-    ),
-    http.post(`${API}/study/hotkey/credential`, () => {
-      exists = true;
-      return HttpResponse.json(
-        {
-          exists: true,
-          hint: "9xYz",
-          created_at: "2026-11-15T10:00:00Z",
-          last_used_at: null,
-          token: "rtk_secret9xYz",
-        },
-        { status: 201 },
-      );
-    }),
-    http.post(`${API}/study/hotkey/test`, ({ request }) =>
-      request.headers.get("authorization") === "Bearer rtk_secret9xYz"
-        ? new HttpResponse("Connected as Anna. Recorder: not running.\n")
-        : new HttpResponse("no", { status: 401 }),
-    ),
-    http.delete(`${API}/study/hotkey/credential`, () => {
-      exists = false;
-      return new HttpResponse(null, { status: 204 });
-    }),
+function float(status: Partial<StudyStatus>, over: { paused?: boolean } = {}) {
+  const onToggle = vi.fn();
+  wrap(
+    <FloatingNotePanel
+      status={{
+        ...IDLE_STUDY,
+        active: true,
+        audioAvailable: true,
+        videoAvailable: true,
+        ...status,
+      }}
+      recording={!over.paused}
+      paused={Boolean(over.paused)}
+      durationMs={543_000}
+      onToggle={onToggle}
+    />,
   );
-  wrap(<MacShortcutSetup isOpen onClose={vi.fn()} lastDelayMs={85} />);
-  // The address is this installation's own.
+  return onToggle;
+}
+
+it("floating window: one focused button that takes and stops a note", async () => {
+  const onToggle = float({ count: 2 });
+  const take = screen.getByRole("button", { name: "Take note" });
+  expect(take).toHaveFocus();
+  expect(screen.getByText("2 notes")).toBeInTheDocument();
+  await userEvent.keyboard("{Enter}");
+  expect(onToggle).toHaveBeenCalledOnce();
+});
+
+it("floating window: shows the open note's length", () => {
+  float({ openSinceMs: 522_000, count: 1 });
+  expect(screen.getByRole("button", { name: "Stop note" })).toBeEnabled();
+  expect(screen.getByText("Capturing note · 00:21")).toBeInTheDocument();
+});
+
+it("floating window: says why no note can be taken", () => {
+  float({}, { paused: true });
+  expect(screen.getByRole("button", { name: "Take note" })).toBeDisabled();
   expect(
-    await screen.findByText(`${window.location.origin}/api/v1/study/hotkey`),
+    screen.getByText("Resume the recording to take notes."),
   ).toBeInTheDocument();
-  expect(screen.getByText("Bearer <your shortcut key>")).toBeInTheDocument();
-  expect(
-    screen.getByRole("button", { name: "Test from this page" }),
-  ).toBeDisabled();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Create shortcut key" }),
-  );
-  expect(await screen.findByText("Bearer rtk_secret9xYz")).toBeInTheDocument();
-  expect(screen.getByText(/shown only once/)).toBeInTheDocument();
-  await userEvent.click(
-    screen.getByRole("button", { name: "Test from this page" }),
-  );
-  expect(
-    await screen.findByText("Connected as Anna. Recorder: not running."),
-  ).toBeInTheDocument();
-  expect(screen.getByText(/85 ms from key to frame/)).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Revoke key" }));
-  expect(await screen.findByText(/was revoked/)).toBeInTheDocument();
-  expect(screen.queryByText("Bearer rtk_secret9xYz")).not.toBeInTheDocument();
 });
 
 // --- crop -----------------------------------------------------------------------
@@ -251,6 +238,7 @@ const note = (seq: number, over: Partial<StudyNote>): StudyNote => ({
   status: "ready",
   text: "The database can use this index.",
   error: null,
+  comment: null,
   end_reason: null,
   source_time_url: null,
   created_at: "2026-11-15T10:00:00Z",
@@ -330,7 +318,7 @@ it("notebook: entries in capture order, each with a text state", async () => {
   ).toBeInTheDocument();
   expect(screen.getByText("5 notes")).toBeInTheDocument();
   expect(
-    screen.getByRole("heading", { name: /Study session · November 15, 2026/ }),
+    screen.getByRole("heading", { name: "Recorded November 15, 2026" }),
   ).toBeInTheDocument();
   const entries = screen.getAllByRole("article");
   expect(entries).toHaveLength(5);
@@ -343,7 +331,9 @@ it("notebook: entries in capture order, each with a text state", async () => {
     first.getByText("The database can use this index."),
   ).toBeInTheDocument();
   expect(
-    await first.findByAltText("Query plans, captured at 08:42"),
+    await first.findByRole("button", {
+      name: "View image: Query plans, captured at 08:42",
+    }),
   ).toBeInTheDocument();
   expect(within(entries[1]).getByText("Transcribing…")).toBeInTheDocument();
   expect(
@@ -357,12 +347,40 @@ it("notebook: entries in capture order, each with a text state", async () => {
   ).toBeInTheDocument();
   // The failed entry keeps its image and can be tried again.
   expect(
-    await within(entries[2]).findByAltText("Query plans, captured at 10:42"),
+    await within(entries[2]).findByRole("button", {
+      name: "View image: Query plans, captured at 10:42",
+    }),
   ).toBeInTheDocument();
   await userEvent.click(
     within(entries[2]).getByRole("button", { name: "Retry" }),
   );
   await waitFor(() => expect(retried).toHaveBeenCalledOnce());
+});
+
+it("notebook: own thoughts are saved apart from the transcript", async () => {
+  const sent: unknown[] = [];
+  server.use(
+    http.patch(`${API}/workspaces/w1/study/notes/n0`, async ({ request }) => {
+      const body = (await request.json()) as { comment: string };
+      sent.push(body);
+      return HttpResponse.json(note(0, { comment: body.comment }));
+    }),
+  );
+  notebookPage([note(0, {}), note(1, { comment: "Ask about this." })]);
+  const fields = await screen.findAllByRole("textbox", { name: "My thoughts" });
+  expect(fields[1]).toHaveValue("Ask about this.");
+  await userEvent.type(fields[0], "Compare with a full scan.");
+  await userEvent.tab();
+  expect(await screen.findByText("Saved")).toBeInTheDocument();
+  expect(sent).toEqual([{ comment: "Compare with a full scan." }]);
+  // The transcript is untouched and still shown as the quote.
+  expect(
+    screen.getAllByText("The database can use this index.")[0].tagName,
+  ).toBe("BLOCKQUOTE");
+  // Leaving the field without a change sends nothing.
+  await userEvent.click(fields[1]);
+  await userEvent.tab();
+  expect(sent).toHaveLength(1);
 });
 
 it("notebook: a refused export says why", async () => {

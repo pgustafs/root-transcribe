@@ -80,39 +80,23 @@ class NotePublic(BaseModel):
     status: str
     text: str | None
     error: str | None
+    comment: str | None
     end_reason: str | None
     source_time_url: str | None
     created_at: datetime
 
 
 class NoteUpdate(BaseModel):
+    """Only the fields that are sent are changed."""
+
     # Empty string removes the link.
-    source_time_url: Annotated[
-        str, StringConstraints(strip_whitespace=True, max_length=2000)
-    ]
+    source_time_url: (
+        Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] | None
+    ) = None
+    # The owner's own words. Empty string removes them.
+    comment: Annotated[str, StringConstraints(max_length=10000)] | None = None
 
 
 class NotebookDetail(NotebookPublic):
     sessions: list[SessionPublic] = Field(default_factory=list)
     notes: list[NotePublic] = Field(default_factory=list)
-
-
-class HotkeyCredentialPublic(BaseModel):
-    exists: bool
-    hint: str | None = None
-    created_at: datetime | None = None
-    last_used_at: datetime | None = None
-    # Only in the answer to "create": the secret is never shown again.
-    token: str | None = None
-
-
-class CommandAck(BaseModel):
-    outcome: Literal["started", "saved", "error"]
-    # paused | sharing_lost | stale | storage | not_recording | busy
-    reason: Annotated[str, StringConstraints(max_length=40)] | None = None
-    captured_ms: int | None = Field(default=None, ge=0)
-    audio_start_ms: int | None = Field(default=None, ge=0)
-    audio_end_ms: int | None = Field(default=None, ge=0)
-    has_audio: bool = True
-    # Milliseconds from the press reaching the server to the frame being pinned.
-    delay_ms: int | None = Field(default=None, ge=0)

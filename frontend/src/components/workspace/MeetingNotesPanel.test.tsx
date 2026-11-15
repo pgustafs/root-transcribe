@@ -114,7 +114,7 @@ it("runs an agent and shows the note it wrote", async () => {
     }),
   );
   showPanel();
-  expect(await screen.findByText("No notes yet")).toBeVisible();
+  expect(await screen.findByText("No documents yet")).toBeVisible();
   // Switched-off agents are not offered; personal ones are grouped apart.
   expect(screen.queryByRole("button", { name: "Off" })).not.toBeInTheDocument();
   expect(screen.getByText("My agents")).toBeVisible();
@@ -124,7 +124,9 @@ it("runs an agent and shows the note it wrote", async () => {
   );
   await actor.click(screen.getByRole("button", { name: "Task list" }));
   await waitFor(() => expect(requested).toEqual({ agent_id: "a2" }));
-  const card = await screen.findByRole("article", { name: "Note: Task list" });
+  const card = await screen.findByRole("article", {
+    name: "Document: Task list",
+  });
   // Rendered as a formatted document, not raw Markdown.
   expect(
     within(card).getByRole("heading", { name: "Summary", level: 2 }),
@@ -147,14 +149,16 @@ it("shows progress while the agent works and the reason when it fails", async ()
     }),
   ];
   showPanel();
-  const working = await screen.findByRole("article", { name: "Note: Summary" });
+  const working = await screen.findByRole("article", {
+    name: "Document: Summary",
+  });
   expect(working).toHaveAttribute("aria-busy", "true");
   expect(
     within(working).getByText("Long meeting: working on part 2 of 4…"),
   ).toBeVisible();
   // The same agent cannot be started twice while it is running.
   expect(screen.getByRole("button", { name: "Summary" })).toBeDisabled();
-  const failed = screen.getByRole("article", { name: "Note: Task list" });
+  const failed = screen.getByRole("article", { name: "Document: Task list" });
   expect(
     within(failed).getByText("The agent service could not be reached."),
   ).toBeVisible();
@@ -177,10 +181,12 @@ it("edits a note with the Markdown editor and saves it", async () => {
     }),
   );
   showPanel();
-  const card = await screen.findByRole("article", { name: "Note: Summary" });
+  const card = await screen.findByRole("article", {
+    name: "Document: Summary",
+  });
   await actor.click(within(card).getByRole("button", { name: "Edit" }));
   const editor = within(card).getByRole("textbox", {
-    name: "Edit note: Summary",
+    name: "Edit document: Summary",
   });
   expect(editor).toHaveValue(notes[0].content_markdown);
   expect(within(card).getByRole("button", { name: "Save" })).toBeDisabled();
@@ -200,7 +206,7 @@ it("edits a note with the Markdown editor and saves it", async () => {
   );
   expect(await within(card).findByText("Edited")).toBeVisible();
   expect(
-    within(card).queryByRole("textbox", { name: "Edit note: Summary" }),
+    within(card).queryByRole("textbox", { name: "Edit document: Summary" }),
   ).not.toBeInTheDocument();
 });
 
@@ -216,15 +222,21 @@ it("keeps earlier versions folded and flags notes from an older transcript", asy
   await actor.click(screen.getByRole("button", { name: "1 earlier version" }));
   expect(await screen.findByText("Older text")).toBeVisible();
   expect(
-    screen.getByText(/The transcript has changed since this note was written/),
+    screen.getByText(
+      /The transcript has changed since this document was written/,
+    ),
   ).toBeVisible();
 });
 
 it("is read-only without the permission and explains a missing model", async () => {
   notes = [note({})];
   showPanel({ canCreate: false, canExport: false, isAvailable: false });
-  const card = await screen.findByRole("article", { name: "Note: Summary" });
-  expect(screen.getByText("Notes cannot be created right now")).toBeVisible();
+  const card = await screen.findByRole("article", {
+    name: "Document: Summary",
+  });
+  expect(
+    screen.getByText("Documents cannot be created right now"),
+  ).toBeVisible();
   expect(
     screen.queryByRole("button", { name: "Task list" }),
   ).not.toBeInTheDocument();

@@ -1,9 +1,7 @@
-"""Database access for study notebooks, sessions, notes and the shortcut key."""
+"""Database access for study notebooks, sessions, and notes."""
 
 from __future__ import annotations
 
-import hashlib
-import secrets
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -17,10 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.crud import audio_object as audio_object_crud
-from app.models.study import HotkeyCredential, StudyNote, StudyNotebook, StudySession
+from app.models.study import StudyNote, StudyNotebook, StudySession
 from app.models.user import User
-
-TOKEN_PREFIX = "rtk_"
 
 # --- notebooks ----------------------------------------------------------------
 
@@ -285,66 +281,6 @@ async def remove_for_recording(
     )
     await delete_sessions(session, ids)
     return len(notes)
-
-
-# --- shortcut credential ------------------------------------------------------
-
-
-def hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def new_token() -> str:
-    return TOKEN_PREFIX + secrets.token_urlsafe(32)
-
-
-async def get_credential(
-    session: AsyncSession, user_id: uuid.UUID
-) -> HotkeyCredential | None:
-    result = await session.execute(
-        select(HotkeyCredential).where(HotkeyCredential.user_id == user_id)
-    )
-    return result.scalars().first()
-
-
-async def replace_credential(
-    session: AsyncSession, user_id: uuid.UUID
-) -> tuple[HotkeyCredential, str]:
-    """A new secret for the user; any earlier one stops working at once."""
-    await session.execute(
-        sa_delete(HotkeyCredential).where(HotkeyCredential.user_id == user_id)
-    )
-    token = new_token()
-    credential = HotkeyCredential(
-        user_id=user_id, token_hash=hash_token(token), hint=token[-4:]
-    )
-    session.add(credential)
-    await session.flush()
-    return credential, token
-
-
-async def revoke_credential(session: AsyncSession, user_id: uuid.UUID) -> bool:
-    result = await session.execute(
-        sa_delete(HotkeyCredential).where(HotkeyCredential.user_id == user_id)
-    )
-    return bool(result.rowcount)
-
-
-async def user_for_token(session: AsyncSession, token: str) -> User | None:
-    """The active user a shortcut secret belongs to (and note that it was used)."""
-    if not token.startswith(TOKEN_PREFIX):
-        return None
-    result = await session.execute(
-        select(HotkeyCredential).where(HotkeyCredential.token_hash == hash_token(token))
-    )
-    credential = result.scalars().first()
-    if credential is None:
-        return None
-    user = await session.get(User, credential.user_id)
-    if user is None or not user.is_active:
-        return None
-    credential.last_used_at = datetime.now(UTC)
-    return user
 
 
 # --- sync helpers (Celery worker) ---------------------------------------------

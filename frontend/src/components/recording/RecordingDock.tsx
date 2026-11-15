@@ -8,7 +8,6 @@ import { useTranslation } from "react-i18next";
 
 import { Alert } from "@/components/Alert";
 import type { UploadProgress } from "@/lib/uploadManager";
-import { useShortcutHint } from "@/hooks/useStudy";
 import type { StudyStatus } from "@/lib/study/noteController";
 import {
   formatDuration as formatSeconds,
@@ -21,7 +20,8 @@ export type StudyDockProps = {
   onToggle: () => void;
   onViewNotes: () => void;
   onChangeSource: () => void;
-  onSetup: () => void;
+  /** The floating Take note window; absent where the browser has none. */
+  floating?: { isOpen: boolean; onToggle: () => void };
 };
 
 export type RecorderDockStatus = "recording" | "paused" | "uploading" | "retry";
@@ -88,7 +88,6 @@ export function RecordingDock({
 }: Props) {
   const { t } = useTranslation(["meetings", "common", "study"]);
   const presentation = STATUS_PRESENTATION[status];
-  const shortcutHint = useShortcutHint();
   const notes = study?.status;
   const noteOpen = notes ? notes.openSinceMs !== null : false;
   // New captures need a live shared tab and a running recording; an open
@@ -196,11 +195,6 @@ export function RecordingDock({
           >
             {noteOpen ? t("study:dock.stopNote") : t("study:dock.takeNote")}
           </Button>
-          {shortcutHint && (
-            <kbd className="rounded-md border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
-              {shortcutHint}
-            </kbd>
-          )}
           {/* Not a live region: the timer ticks every second. Start and save
               are announced once in the region below. */}
           <span id="study-dock-state" className="text-sm text-muted-foreground">
@@ -222,9 +216,18 @@ export function RecordingDock({
           <Button onClick={study.onChangeSource} variant="ghost" size="sm">
             {t("study:dock.changeSource")}
           </Button>
-          <Button onClick={study.onSetup} variant="ghost" size="sm">
-            {t("study:dock.setupShortcut")}
-          </Button>
+          {study.floating && (
+            <Button
+              onClick={study.floating.onToggle}
+              variant="ghost"
+              size="sm"
+              aria-pressed={study.floating.isOpen}
+            >
+              {study.floating.isOpen
+                ? t("study:dock.hideFloating")
+                : t("study:dock.showFloating")}
+            </Button>
+          )}
           <span className="sr-only" aria-live="polite">
             {noteOpen
               ? t("study:dock.started")

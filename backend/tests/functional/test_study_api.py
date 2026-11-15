@@ -1,8 +1,7 @@
-"""Functional tests: study notebooks, notes, export and the keyboard shortcut."""
+"""Functional tests: study notebooks, notes and export."""
 
 from __future__ import annotations
 
-import asyncio
 import io
 import uuid
 import zipfile
@@ -13,10 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audio_object import AudioObject
-from app.models.study import HotkeyCredential, StudyNote
+from app.models.study import StudyNote
 from app.models.task_outbox import TaskOutbox
 from app.models.user import User
-from app.services import study_commands
 
 from .test_meetings_api import (
     _FakeAudioStore,
@@ -38,14 +36,6 @@ PNG = (
 WAV = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 60
 
 __all__ = ["meetings_enabled"]  # re-exported fixture
-
-
-@pytest.fixture
-def bus():
-    memory = study_commands.MemoryCommandBus()
-    study_commands.set_command_bus(memory)
-    yield memory
-    study_commands.set_command_bus(None)
 
 
 async def _notebook(client, wid, headers, **body) -> dict:
@@ -171,6 +161,26 @@ async def test_notes_are_idempotent_ordered_and_exported(
     )
     assert image.status_code == 200 and image.content == PNG
 
+    # The owner's own words: saved apart from the transcript, and removable.
+    note_url = f"{API}/workspaces/{wid}/study/notes/{first}"
+    written = await client.patch(
+        note_url, headers=user_token_headers, json={"comment": " Compare plans. "}
+    )
+    assert written.status_code == 200
+    assert written.json()["comment"] == "Compare plans."
+    assert written.json()["text"] is None
+    other = await client.patch(
+        f"{API}/workspaces/{wid}/study/notes/{second}",
+        headers=user_token_headers,
+        json={"comment": "x"},
+    )
+    cleared = await client.patch(
+        f"{API}/workspaces/{wid}/study/notes/{second}",
+        headers=user_token_headers,
+        json={"comment": ""},
+    )
+    assert other.json()["comment"] == "x" and cleared.json()["comment"] is None
+
     export = await client.get(
         f"{API}/workspaces/{wid}/study/notebooks/{notebook['id']}/export",
         headers=user_token_headers,
@@ -186,6 +196,7 @@ async def test_notes_are_idempotent_ordered_and_exported(
         document = archive.read("Query-plans.md").decode()
     assert "*Screenshot only. Tab audio was unavailable.*" in document
     assert "> Indexet används här." in document
+    assert "**My notes**\n\nCompare plans.\n" in document
     assert document.index("note-001") < document.index("note-002")
 
     # Wrong files are refused.
@@ -340,147 +351,3 @@ async def test_cancelled_session_discards_its_notes(
     assert (await client.delete(url, headers=user_token_headers)).status_code == 204
     assert (await client.delete(url, headers=user_token_headers)).status_code == 204
     assert (await db_session.execute(select(StudyNote))).scalars().all() == []
-
-
-async def _credential(client, headers) -> str:
-    resp = await client.post(f"{API}/study/hotkey/credential", headers=headers)
-    assert resp.status_code == 201, resp.text
-    return resp.json()["token"]
-
-
-async def test_shortcut_key_is_hashed_rotated_and_revoked(
-    client: AsyncClient,
-    user_token_headers: dict,
-    db_session: AsyncSession,
-    bus: study_commands.MemoryCommandBus,
-) -> None:
-    empty = await client.get(
-        f"{API}/study/hotkey/credential", headers=user_token_headers
-    )
-    assert empty.json()["exists"] is False
-    token = await _credential(client, user_token_headers)
-    stored = (await db_session.execute(select(HotkeyCredential))).scalars().one()
-    assert stored.token_hash != token and token.endswith(stored.hint)
-    shown = await client.get(
-        f"{API}/study/hotkey/credential", headers=user_token_headers
-    )
-    assert shown.json()["token"] is None and shown.json()["hint"] == token[-4:]
-
-    def press(secret: str):
-        return client.post(
-            f"{API}/study/hotkey/test", headers={"Authorization": f"Bearer {secret}"}
-        )
-
-    ok = await press(token)
-    assert ok.status_code == 200
-    assert "Recorder: not running." in ok.text and "Connected as" in ok.text
-    # The secret opens nothing but the shortcut routes.
-    api = await client.get(
-        f"{API}/workspaces/mine", headers={"Authorization": f"Bearer {token}"}
-    )
-    assert api.status_code == 401
-    # Rotation: the old secret stops working at once.
-    newer = await _credential(client, user_token_headers)
-    assert (await press(token)).status_code == 401
-    assert (await press(newer)).status_code == 200
-    revoked = await client.delete(
-        f"{API}/study/hotkey/credential", headers=user_token_headers
-    )
-    assert revoked.status_code == 204
-    assert (await press(newer)).status_code == 401
-    assert (await press("rtk_wrong")).status_code == 401
-    assert (await client.post(f"{API}/study/hotkey/test")).status_code == 401
-
-
-async def test_a_press_starts_and_stops_one_note(
-    client: AsyncClient,
-    user_token_headers: dict,
-    normal_user: User,
-    bus: study_commands.MemoryCommandBus,
-) -> None:
-    token = await _credential(client, user_token_headers)
-    auth = {"Authorization": f"Bearer {token}"}
-
-    idle = await client.post(f"{API}/study/hotkey", headers=auth)
-    assert idle.status_code == 409 and "No recording" in idle.text
-
-    seen: list[dict] = []
-    answers = iter(
-        [
-            {"outcome": "started", "captured_ms": 522_000},
-            {
-                "outcome": "saved",
-                "captured_ms": 522_000,
-                "audio_start_ms": 507_000,
-                "audio_end_ms": 543_000,
-            },
-            {"outcome": "error", "reason": "paused"},
-        ]
-    )
-
-    async def browser(connection: str) -> None:
-        async for command in bus.listen(normal_user.id, connection, "session"):
-            if command is None:
-                continue
-            seen.append(command)
-            # The browser reports through the API, like the real one.
-            await client.post(
-                f"{API}/study/commands/{command['invocation']}/ack",
-                headers=user_token_headers,
-                json=next(answers),
-            )
-
-    recorder = asyncio.create_task(browser("one"))
-    await asyncio.sleep(0)
-
-    def press(invocation: str):
-        return client.post(
-            f"{API}/study/hotkey", headers={**auth, "X-Invocation-Id": invocation}
-        )
-
-    started = await press("press-1")
-    assert (started.status_code, started.text) == (200, "Note started · 08:42\n")
-    assert started.headers["x-study-outcome"] == "started"
-    # The same press again: the first answer, no second delivery.
-    assert (await press("press-1")).text == "Note started · 08:42\n"
-    assert len(seen) == 1 and seen[0]["action"] == "toggle"
-    saved = await press("press-2")
-    assert saved.text == "Note saved · 08:27–09:03\n"
-    assert (await press("press-2")).text == saved.text and len(seen) == 2
-    paused = await press("press-3")
-    assert paused.status_code == 409 and "paused" in paused.text
-
-    # A second open recorder makes the press ambiguous: nothing is captured.
-    second = asyncio.create_task(browser("two"))
-    await asyncio.sleep(0)
-    ambiguous = await press("press-4")
-    assert ambiguous.status_code == 409 and "Two recorders" in ambiguous.text
-    assert len(seen) == 3
-    for task in (recorder, second):
-        task.cancel()
-    await asyncio.sleep(0)
-    gone = await press("press-5")
-    assert gone.status_code == 409
-
-
-async def test_a_press_that_is_not_confirmed_says_so(
-    client: AsyncClient,
-    user_token_headers: dict,
-    normal_user: User,
-    bus: study_commands.MemoryCommandBus,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(study_commands, "ACK_TIMEOUT_SECONDS", 0.05)
-    token = await _credential(client, user_token_headers)
-
-    async def silent() -> None:
-        async for _ in bus.listen(normal_user.id, "one", "session"):
-            pass
-
-    task = asyncio.create_task(silent())
-    await asyncio.sleep(0)
-    resp = await client.post(
-        f"{API}/study/hotkey", headers={"Authorization": f"Bearer {token}"}
-    )
-    assert resp.status_code == 504 and "did not confirm" in resp.text
-    task.cancel()

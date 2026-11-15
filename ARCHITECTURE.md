@@ -112,7 +112,7 @@ Source: [runner](agent-runner/main.py), [runner image](deploy/agent.Containerfil
 [export](backend/app/services/note_export.py),
 [models](backend/app/models/meeting_note.py).
 
-### Study notes
+### Notebooks (code name: study notes)
 
 A learner records a tab and takes notes: a PNG of the visible frame plus the
 transcript of a short piece of the tab's audio.
@@ -125,35 +125,31 @@ transcript of a short piece of the tab's audio.
   same moment; PNG encoding and storing happen afterwards. An open note appends
   later blocks to IndexedDB in 5-second chunks and is joined by sample
   position. Pause, resume and "Change source" start a new interval.
-- **State.** `lib/study/noteController.ts` is one state machine for the dock
-  button and the shortcut. Presses are handled one at a time; each shortcut
-  press has an id, and what it did is stored (IndexedDB, and for 10 minutes on
-  the server) so a repeat returns the first answer.
+- **State.** `lib/study/noteController.ts` is one state machine for the Take
+  note button in the recording bar and in the floating window. Presses are
+  handled one at a time.
+- **Floating window.** `hooks/useFloatingWindow.ts` opens a small
+  always-on-top window (Document Picture-in-Picture, Chrome and Edge) and the
+  provider renders `FloatingNotePanel` into it with a portal, so it shares the
+  page's state. It is not part of the shared tab and never appears in a frame.
 - **Local store.** IndexedDB database `study-notes` (separate from the
   recorder's). Notes are written there first and uploaded with a
   browser-made id (`PUT …/study/notes/{id}`), so retries and reloads never
   duplicate. A note left open by a crash is completed from its stored samples.
 - **Server.** Tables `study_notebook` (owner + workspace + source, one per
-  video), `study_session`, `study_note`, `hotkey_credential`. Images and
+  video), `study_session`, `study_note`. Images and
   excerpts are objects in the audio store with `audio_object` rows
   (`study_image`, `study_audio`). `tasks.transcribe_study_note` (default
   queue, no diarization) transcribes the excerpt with the recording's language
   and then requests deletion of the excerpt; a failed note keeps it for Retry
   (swept after 7 days). Deleting the recording, the notebook or the workspace
   tombstones the media.
+- **Own words.** `study_note.comment` holds what the owner writes on a note
+  (`PATCH …/study/notes/{id}`); it is never mixed with `text`, the transcript.
 - **Access.** Capability `study_notes` (editor and above). Notebooks are
   private to their owner; every route checks owner and workspace. Exporting a
   notebook that contains entries from a *restricted* recording needs the
   explicit per-user grant.
-- **Shortcut delivery.** The recording browser holds a server-sent-events
-  stream (`GET /study/commands/stream`, normal sign-in). `POST /study/hotkey`
-  (shortcut key in the `Authorization` header) publishes the press on Redis
-  channel `study:cmd:{user}`; the API process holding the stream forwards it,
-  the browser acts and acknowledges, and the waiting request answers in plain
-  text. No recorder, two recorders, a paused recording, a lost tab and a press
-  older than 2 seconds each get their own answer. nginx serves the stream from
-  a dedicated unbuffered location. The shortcut key is accepted by the two
-  hotkey routes only.
 
 ## Recording and transcription flow
 
@@ -384,7 +380,8 @@ Browser IndexedDB contains local recovery copies, independently of server storag
 
 Alembic migrations are explicit and ordered. `0001_transcription` initializes
 an empty application database; `0002_recording_language` and
-`0003_meeting_notes`, `0004_speaker_names` and `0005_study_notes` upgrade it (`0003` also inserts
+`0003_meeting_notes`, `0004_speaker_names`, `0005_study_notes`,
+`0006_drop_hotkey_credential` and `0007_study_note_comment` upgrade it (`0003` also inserts
 the built-in note agents). Run
 `alembic upgrade head` for both new installations and upgrades. Do not edit an
 applied migration or change version markers to bypass an upgrade. Schema parity

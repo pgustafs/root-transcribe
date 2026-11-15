@@ -1,12 +1,10 @@
 /**
- * Study notes during a recording: one state machine for the dock button and
- * the keyboard shortcut.
+ * Study notes during a recording: one state machine for the Take note button
+ * (in the recording bar and in the floating window).
  *
  * A press is one transition: `idle → open` (frame saved, look-back taken) or
- * `open → idle` (the note is complete). Presses run one at a time, so a dock
- * click and a shortcut can never act on the same state twice. Each shortcut
- * press carries an id; what it did is stored before it is confirmed, and the
- * same id always gets that first answer.
+ * `open → idle` (the note is complete). Presses run one at a time, so two
+ * clicks can never act on the same state twice.
  *
  * Everything is written to IndexedDB before it is sent. Uploading is a
  * separate, repeatable step that also runs after a reload.
@@ -16,11 +14,6 @@ import axios from "axios";
 
 import * as studyApi from "@/api/study";
 import {
-  type CommandStreamHandlers,
-  openCommandStream,
-  type StudyCommand,
-} from "@/lib/study/commandStream";
-import {
   type Crop,
   FrameGrabber,
   frameToPng,
@@ -28,7 +21,6 @@ import {
 } from "@/lib/study/frame";
 import * as store from "@/lib/study/noteStore";
 import type {
-  InvocationResult,
   StoredNote,
   StoredStudySession,
   StudyMode,
@@ -51,6 +43,16 @@ export type EndReason =
   | "sharing_lost"
   | "max_length"
   | "interrupted";
+
+/** What one press did. */
+export type PressResult = {
+  outcome: "started" | "saved" | "error";
+  reason?: string;
+  captured_ms?: number;
+  audio_start_ms?: number | null;
+  audio_end_ms?: number | null;
+  has_audio?: boolean;
+};
 
 /** A frame that is held in memory, not yet encoded. */
 export type PinnedFrame = { encode: (crop: Crop) => Promise<Blob> };
@@ -81,12 +83,8 @@ export type StudyStatus = {
   count: number;
   /** Notes not yet confirmed by the server. */
   waiting: number;
-  /** The shortcut connection is up. */
-  connected: boolean;
   audioAvailable: boolean;
   videoAvailable: boolean;
-  /** Milliseconds from the last shortcut press to its frame. */
-  lastDelayMs: number | null;
   /** Why the last open note ended by itself, or the last press failed. */
   notice: string | null;
   /** Bumped on every finished capture (for "saved" announcements). */
@@ -103,10 +101,8 @@ export const IDLE_STUDY: StudyStatus = {
   openSinceMs: null,
   count: 0,
   waiting: 0,
-  connected: false,
   audioAvailable: false,
   videoAvailable: false,
-  lastDelayMs: null,
   notice: null,
   savedTick: 0,
 };
@@ -126,17 +122,9 @@ export type ControllerDeps = {
   isPaused: () => boolean;
   onChange: (status: StudyStatus) => void;
   createSource?: (display: MediaStream) => Promise<CaptureSource>;
-  openStream?: (
-    sessionId: string,
-    handlers: CommandStreamHandlers,
-  ) => () => void;
   api?: Pick<
     typeof studyApi,
-    | "putSession"
-    | "putNote"
-    | "linkSession"
-    | "deleteSession"
-    | "acknowledgeCommand"
+    "putSession" | "putNote" | "linkSession" | "deleteSession"
   >;
   newId?: () => string;
 };
@@ -432,9 +420,7 @@ export class StudyNoteController {
   private session: StoredStudySession | null = null;
   private source: CaptureSource | null = null;
   private open: OpenNote | null = null;
-  private closeStream: (() => void) | null = null;
   private chain: Promise<unknown> = Promise.resolve();
-  private inflight = new Map<string, Promise<InvocationResult>>();
   private readonly api: NonNullable<ControllerDeps["api"]>;
   private readonly newId: () => string;
   private readonly onFlush = () => void this.refreshCounts();
@@ -523,26 +509,10 @@ export class StudyNoteController {
         mode: session.mode,
         audioAvailable: source.buffer !== null,
         videoAvailable: source.hasVideo,
-        lastDelayMs: this.status.lastDelayMs,
         savedTick: this.status.savedTick,
       });
       await this.refreshCounts();
-      // The server needs the session before the shortcut stream is accepted.
-      void ensureServerSession(this.api, session)
-        .catch(() => {})
-        .finally(() => {
-          if (this.session?.id !== session.id) return;
-          this.closeStream = (this.deps.openStream ?? openCommandStream)(
-            session.id,
-            {
-              onCommand: (command, ageMs) =>
-                void this.onCommand(command, ageMs),
-              onState: (connected) => {
-                if (this.session?.id === session.id) this.set({ connected });
-              },
-            },
-          );
-        });
+      void ensureServerSession(this.api, session).catch(() => {});
     });
   }
 
@@ -564,107 +534,53 @@ export class StudyNoteController {
     return this.source.grab().then((frame) => frame.encode(FULL_FRAME));
   }
 
-  /** The dock button. */
-  toggle(): Promise<InvocationResult> {
-    return this.press(null);
+  /**
+   * One press of Take note / Stop note. The decision and the pinning (frame
+   * held, look-back taken, state changed) happen in turn, one press at a
+   * time, and take a few tens of milliseconds. Encoding and storing the image
+   * then finish outside the queue, so the next press is not held up.
+   */
+  async toggle(): Promise<PressResult> {
+    let result: PressResult;
+    try {
+      const pending = await this.serialized(async () => ({
+        settled: await this.decide(),
+      }));
+      result = await pending.settled;
+    } catch {
+      result = { outcome: "error", reason: "storage" };
+    }
+    this.set({
+      notice: result.outcome === "error" ? (result.reason ?? null) : null,
+    });
+    return result;
   }
 
-  /** Stop the open note (dock "Stop note"). */
+  /** Stop the open note. */
   stopNote(): Promise<void> {
     return this.serialized(async () => {
       await this.finishOpen(null);
     });
   }
 
-  private async onCommand(command: StudyCommand, ageMs: number): Promise<void> {
-    const result = await this.press({
-      id: command.invocation,
-      ageMs,
-      staleAfterMs: command.stale_after_ms,
-    });
-    try {
-      await this.api.acknowledgeCommand(command.invocation, result);
-    } catch {
-      // The Mac is told the press was not confirmed; the stored answer serves
-      // the same press if it is sent again.
-    }
-  }
-
-  /**
-   * One press. The decision and the pinning (frame held, look-back taken,
-   * state changed) happen in turn, one press at a time, and take a few tens
-   * of milliseconds. Encoding and storing the image then finish outside the
-   * queue, so the next press is not held up; the answer is given only once
-   * everything is stored.
-   */
-  private press(
-    press: { id: string; ageMs: number; staleAfterMs: number } | null,
-  ): Promise<InvocationResult> {
-    if (press) {
-      const running = this.inflight.get(press.id);
-      if (running) return running;
-    }
-    const work = (async (): Promise<InvocationResult> => {
-      let result: InvocationResult;
-      try {
-        if (press) {
-          const earlier = await store
-            .getInvocation(press.id)
-            .catch(() => undefined);
-          if (earlier) return earlier;
-        }
-        const pending = await this.serialized(async () => ({
-          settled: await this.decide(press),
-        }));
-        result = await pending.settled;
-      } catch {
-        result = { outcome: "error", reason: "storage" };
-      }
-      this.set({
-        notice: result.outcome === "error" ? (result.reason ?? null) : null,
-      });
-      if (press) {
-        // Stored BEFORE the press is confirmed: a repeat gets this answer.
-        await store.putInvocation(press.id, result).catch(() => {});
-        if (result.delay_ms !== undefined)
-          this.set({ lastDelayMs: result.delay_ms });
-      }
-      return result;
-    })();
-    if (press) {
-      const id = press.id;
-      this.inflight.set(id, work);
-      void work.finally(() => this.inflight.delete(id));
-    }
-    return work;
-  }
-
   /** Runs inside the queue. Returns the rest of the work as a promise. */
-  private async decide(
-    press: { id: string; ageMs: number; staleAfterMs: number } | null,
-  ): Promise<Promise<InvocationResult> | InvocationResult> {
+  private async decide(): Promise<Promise<PressResult> | PressResult> {
     if (!this.session || !this.source)
       return { outcome: "error", reason: "not_recording" };
     if (this.open) return this.finishOpen(null);
-    // Too late to show the moment the key was pressed: take nothing.
-    if (press && press.ageMs > press.staleAfterMs)
-      return { outcome: "error", reason: "stale" };
     if (this.deps.isPaused()) return { outcome: "error", reason: "paused" };
     if (!this.source.hasVideo || !this.source.isLive())
       return { outcome: "error", reason: "sharing_lost" };
-    return this.capture(press?.ageMs ?? null);
+    return this.capture();
   }
 
   /**
    * Pin a capture (inside the queue), and return the storing of it as a
    * promise that the queue does not wait for.
    */
-  private async capture(
-    pressAgeMs: number | null,
-  ): Promise<Promise<InvocationResult>> {
+  private async capture(): Promise<Promise<PressResult>> {
     const session = this.session as StoredStudySession;
     const source = this.source as CaptureSource;
-    const startedAt = performance.now();
     const capturedMs = Math.max(0, Math.round(this.deps.clock()));
     const id = this.newId();
     const buffer = source.buffer;
@@ -697,11 +613,6 @@ export class StudyNoteController {
       if (keepOpen) buffer?.endNote();
       throw error;
     }
-    // Key press to frame held: what the note shows is from this moment.
-    const delayMs =
-      pressAgeMs === null
-        ? undefined
-        : Math.round(pressAgeMs + (performance.now() - startedAt));
     const base: StoredNote = {
       id,
       sessionId: session.id,
@@ -744,16 +655,15 @@ export class StudyNoteController {
       };
       this.set({ openSinceMs: capturedMs });
       return stored.then(
-        (): InvocationResult => {
+        (): PressResult => {
           void this.refreshCounts();
           return {
             outcome: "started",
             captured_ms: capturedMs,
             audio_start_ms: audioStartMs,
-            delay_ms: delayMs,
           };
         },
-        async (): Promise<InvocationResult> => {
+        async (): Promise<PressResult> => {
           // The image could not be stored: the note cannot exist.
           await this.serialized(async () => {
             if (this.open?.id !== id) return;
@@ -768,7 +678,7 @@ export class StudyNoteController {
     }
     // One complete note per press ("Last 15 seconds only"), or no tab audio.
     const hasAudio = lookback !== null;
-    return (async (): Promise<InvocationResult> => {
+    return (async (): Promise<PressResult> => {
       const image = await pinned.encode(crop);
       await store.putNote({
         ...base,
@@ -787,15 +697,12 @@ export class StudyNoteController {
         audio_start_ms: hasAudio ? audioStartMs : null,
         audio_end_ms: hasAudio ? capturedMs : null,
         has_audio: hasAudio,
-        delay_ms: delayMs,
       };
     })();
   }
 
   /** Complete the open note at the last sample we have. */
-  private async finishOpen(
-    reason: EndReason | null,
-  ): Promise<InvocationResult> {
+  private async finishOpen(reason: EndReason | null): Promise<PressResult> {
     const open = this.open;
     if (!open) return { outcome: "error", reason: "not_recording" };
     this.open = null;
@@ -854,8 +761,6 @@ export class StudyNoteController {
 
   private async detach(reason: EndReason): Promise<void> {
     if (this.open) await this.finishOpen(reason);
-    this.closeStream?.();
-    this.closeStream = null;
     this.source?.close();
     this.source = null;
     if (this.session) {
@@ -872,7 +777,7 @@ export class StudyNoteController {
     return this.serialized(async () => {
       if (!this.session) return;
       await this.detach(reason);
-      this.set({ ...IDLE_STUDY, lastDelayMs: this.status.lastDelayMs });
+      this.set(IDLE_STUDY);
       void flushStudyNotes(this.api);
     });
   }

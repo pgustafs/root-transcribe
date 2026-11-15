@@ -1,21 +1,16 @@
 """Study notes: notebooks of screenshots with transcribed excerpts.
 
-A learner records a browser tab and presses "Take note" (in the app or with a
-keyboard shortcut on their computer). Each press stores the visible frame and
-a short piece of the tab's audio, which is transcribed on its own.
+A learner records a browser tab and presses "Take note" in the app. Each press
+stores the visible frame and a short piece of the tab's audio, which is
+transcribed on its own.
 
-* ``/workspaces/{id}/study/…`` — notebooks, sessions and notes. Private to
-  their owner; needs the ``study_notes`` capability.
-* ``/study/hotkey…`` — the shortcut credential and the press itself.
-* ``/study/commands/…`` — the stream the recording browser listens on, and its
-  acknowledgement of a press.
+``/workspaces/{id}/study/…`` — notebooks, sessions and notes. Private to their
+owner; needs the ``study_notes`` capability.
 """
 
 from __future__ import annotations
 
 import contextlib
-import json
-import time
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -26,13 +21,11 @@ from fastapi import (
     Depends,
     File,
     Form,
-    Header,
     Query,
     Response,
     UploadFile,
     status,
 )
-from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from app.api.deps import CurrentUserDep
 from app.api.v1.routes.meetings import (
@@ -45,7 +38,6 @@ from app.core.config import settings
 from app.core.exceptions import AppError, ConflictError, NotFoundError
 from app.core.logging import request_id_ctx
 from app.core.meeting_permissions import MeetingCapability
-from app.core.rate_limit import get_rate_limiter
 from app.crud import audio_object as audio_object_crud
 from app.crud import meeting_governance as meeting_governance_crud
 from app.crud import meeting_recording as meeting_recording_crud
@@ -55,8 +47,6 @@ from app.db.session import SessionDep
 from app.models.study import StudyNote, StudyNotebook, StudySession
 from app.models.user import User
 from app.schemas.study import (
-    CommandAck,
-    HotkeyCredentialPublic,
     NotebookCreate,
     NotebookDetail,
     NotebookPublic,
@@ -67,7 +57,7 @@ from app.schemas.study import (
     SessionPublic,
     SessionUpdate,
 )
-from app.services import study_commands, study_export, study_source
+from app.services import study_export, study_source
 from app.services.audio_store import get_audio_store, key_namespace
 from app.services.task_outbox import try_dispatch
 
@@ -79,10 +69,7 @@ _ENABLED = [Depends(ensure_meetings_enabled)]
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 #: 16 kHz mono 16-bit is about 1.9 MB a minute; the STT endpoint takes 25 MB.
 MAX_AUDIO_BYTES = 24 * 1024 * 1024
-HOTKEY_PER_MINUTE = 30
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-#: A command older than this cannot capture the moment the key was pressed.
-STALE_COMMAND_MS = 2000
 
 # --- access -------------------------------------------------------------------
 
@@ -314,6 +301,7 @@ async def export_notebook(
                 audio_end_ms=note.audio_end_ms,
                 status=note.status,
                 text=note.text,
+                comment=note.comment,
                 image=None,
                 source_time_url=note.source_time_url,
             ),
@@ -598,12 +586,16 @@ async def update_note(
     session: SessionDep,
     user: CurrentUserDep,
 ) -> NotePublic:
-    """Attach the player's "copy URL at current time" link to a note. It must
-    point at the notebook's own source."""
+    """Change the owner's own words on a note, or attach the player's "copy
+    URL at current time" link (it must point at the notebook's own source)."""
     await _guard(session, user, workspace_id)
     note, notebook = await _note(session, user, workspace_id, note_id)
+    if payload.comment is not None:
+        note.comment = payload.comment.strip() or None
     url = payload.source_time_url
-    if not url:
+    if url is None:
+        pass
+    elif not url:
         note.source_time_url = None
     else:
         if not study_source.is_http_url(url):
@@ -656,250 +648,4 @@ async def note_image(
         content=data,
         media_type="image/png",
         headers={"Cache-Control": "private, max-age=3600"},
-    )
-
-
-# --- shortcut credential ------------------------------------------------------
-
-
-@router.get("/study/hotkey/credential")
-async def get_hotkey_credential(
-    session: SessionDep, user: CurrentUserDep
-) -> HotkeyCredentialPublic:
-    credential = await study_crud.get_credential(session, user.id)
-    if credential is None:
-        return HotkeyCredentialPublic(exists=False)
-    return HotkeyCredentialPublic(
-        exists=True,
-        hint=credential.hint,
-        created_at=credential.created_at,
-        last_used_at=credential.last_used_at,
-    )
-
-
-@router.post("/study/hotkey/credential", status_code=status.HTTP_201_CREATED)
-async def create_hotkey_credential(
-    session: SessionDep, user: CurrentUserDep
-) -> HotkeyCredentialPublic:
-    """A new shortcut secret, shown once. The previous one stops working."""
-    credential, token = await study_crud.replace_credential(session, user.id)
-    await meeting_governance_crud.record_audit(
-        session,
-        action="study.hotkey.create",
-        actor=user,
-        target={"hint": credential.hint},
-        request_id=request_id_ctx.get(),
-    )
-    await session.commit()
-    await session.refresh(credential)
-    return HotkeyCredentialPublic(
-        exists=True,
-        hint=credential.hint,
-        created_at=credential.created_at,
-        token=token,
-    )
-
-
-@router.delete("/study/hotkey/credential", status_code=status.HTTP_204_NO_CONTENT)
-async def revoke_hotkey_credential(session: SessionDep, user: CurrentUserDep) -> None:
-    if await study_crud.revoke_credential(session, user.id):
-        await meeting_governance_crud.record_audit(
-            session,
-            action="study.hotkey.revoke",
-            actor=user,
-            request_id=request_id_ctx.get(),
-        )
-    await session.commit()
-
-
-# --- the press ----------------------------------------------------------------
-
-
-def _text(message: str, code: int = 200, outcome: str = "error") -> PlainTextResponse:
-    return PlainTextResponse(
-        message + "\n", status_code=code, headers={"X-Study-Outcome": outcome}
-    )
-
-
-async def _hotkey_user(
-    session: SessionDep, authorization: str | None
-) -> User | PlainTextResponse:
-    """The user a shortcut secret belongs to. The secret opens nothing else:
-    every other route requires a signed-in session."""
-    scheme, _, token = (authorization or "").partition(" ")
-    user = None
-    if scheme.lower() == "bearer" and token.strip():
-        user = await study_crud.user_for_token(session, token.strip())
-    if user is None:
-        return _text(
-            "This shortcut is not connected to Root Transcribe. Create a new "
-            "shortcut key under Set up Mac shortcut.",
-            status.HTTP_401_UNAUTHORIZED,
-        )
-    await session.commit()  # last_used_at
-    limit = await get_rate_limiter().hit(
-        f"rl:hotkey:{user.id}", per_minute=HOTKEY_PER_MINUTE
-    )
-    if not limit.allowed:
-        return _text(
-            "Too many presses. Wait a moment.", status.HTTP_429_TOO_MANY_REQUESTS
-        )
-    return user
-
-
-_ERRORS: dict[str, tuple[int, str]] = {
-    "paused": (409, "The recording is paused. Resume it to take notes."),
-    "sharing_lost": (
-        409,
-        "The shared tab is no longer available. Share it again in Root Transcribe.",
-    ),
-    "stale": (408, "The press arrived too late to capture that moment. Press again."),
-    "storage": (500, "The note could not be saved in the browser."),
-    "not_recording": (409, "No recording with study notes is running."),
-    "busy": (409, "The recorder is busy. Press again."),
-}
-
-
-def _answer(result: dict) -> PlainTextResponse:
-    """The sentence the Mac shows for what the browser did."""
-    outcome = result.get("outcome")
-    clock = study_export.clock
-    if outcome == "started":
-        return _text(
-            f"Note started · {clock(result.get('captured_ms') or 0)}", 200, "started"
-        )
-    if outcome == "saved":
-        start, end = result.get("audio_start_ms"), result.get("audio_end_ms")
-        if not result.get("has_audio", True) or start is None or end is None:
-            return _text("Note saved · screenshot only (no tab audio)", 200, "saved")
-        return _text(f"Note saved · {clock(start)}–{clock(end)}", 200, "saved")
-    code, message = _ERRORS.get(
-        result.get("reason") or "", (500, "The note could not be taken.")
-    )
-    return _text(message, code)
-
-
-@router.post("/study/hotkey", response_class=PlainTextResponse)
-async def press_hotkey(
-    session: SessionDep,
-    authorization: Annotated[str | None, Header()] = None,
-    x_invocation_id: Annotated[str | None, Header(max_length=80)] = None,
-) -> PlainTextResponse:
-    """One press of the shortcut: start a note, or stop the open one.
-
-    The answer is a plain sentence. A repeated request with the same
-    ``X-Invocation-Id`` returns the first answer and never acts twice.
-    """
-    user = await _hotkey_user(session, authorization)
-    if isinstance(user, PlainTextResponse):
-        return user
-    user_id = user.id
-    invocation = (x_invocation_id or "").strip() or uuid.uuid4().hex
-    bus = study_commands.get_command_bus()
-    stored = await bus.result(user_id, invocation)
-    if stored is not None:
-        return _answer(stored)
-    recorders = await bus.recorders(user_id)
-    if not recorders:
-        return _text(
-            "No recording with study notes is running in Root Transcribe. "
-            "Start one, or open its browser tab if it lost the connection.",
-            status.HTTP_409_CONFLICT,
-        )
-    if len(recorders) > 1:
-        return _text(
-            "Two recorders are open for your account. Stop one of them, so "
-            "the press has one place to go.",
-            status.HTTP_409_CONFLICT,
-        )
-    command = {
-        "invocation": invocation,
-        "action": "toggle",
-        "sent_ms": int(time.time() * 1000),
-        "stale_after_ms": STALE_COMMAND_MS,
-    }
-    try:
-        result = await bus.deliver(
-            user_id, command, timeout=study_commands.ACK_TIMEOUT_SECONDS
-        )
-    except study_commands.NotConnected:
-        return _text(
-            "The recorder is not connected. Open its browser tab; it "
-            "reconnects by itself.",
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-    if result is None:
-        return _text(
-            "The press reached the recorder, but it did not confirm that the "
-            "note was saved. Check the notes in Root Transcribe.",
-            status.HTTP_504_GATEWAY_TIMEOUT,
-        )
-    return _answer(result)
-
-
-@router.post("/study/hotkey/test", response_class=PlainTextResponse)
-async def test_hotkey(
-    session: SessionDep,
-    authorization: Annotated[str | None, Header()] = None,
-) -> PlainTextResponse:
-    """Check the shortcut without taking a note."""
-    user = await _hotkey_user(session, authorization)
-    if isinstance(user, PlainTextResponse):
-        return user
-    name = user.full_name or user.email
-    recorders = await study_commands.get_command_bus().recorders(user.id)
-    if len(recorders) == 1:
-        state = "ready"
-    elif recorders:
-        state = "open in two places"
-    else:
-        state = "not running"
-    return _text(f"Connected as {name}. Recorder: {state}.", 200, "test")
-
-
-@router.get("/study/commands/stream")
-async def command_stream(
-    session: SessionDep,
-    user: CurrentUserDep,
-    session_id: Annotated[uuid.UUID, Query()],
-) -> StreamingResponse:
-    """Server-sent events for the browser that records: one ``command`` event
-    per press. Open only while a study session is recording."""
-    user_id = user.id
-    owned = await study_crud.owned_session(
-        session, session_id=session_id, owner_id=user_id
-    )
-    if owned is None:
-        raise NotFoundError("Study session not found")
-    # The stream lives for the whole recording: give the database connection
-    # back now instead of holding it for hours.
-    await session.commit()
-    bus = study_commands.get_command_bus()
-    connection_id = uuid.uuid4().hex
-
-    async def events():
-        hello = {"server_ms": int(time.time() * 1000), "connection": connection_id}
-        yield f"event: hello\ndata: {json.dumps(hello)}\n\n"
-        async for command in bus.listen(user_id, connection_id, str(session_id)):
-            if command is None:
-                yield ": ping\n\n"
-            else:
-                yield f"event: command\ndata: {json.dumps(command)}\n\n"
-
-    return StreamingResponse(
-        events(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.post("/study/commands/{invocation}/ack", status_code=status.HTTP_204_NO_CONTENT)
-async def acknowledge_command(
-    invocation: str, payload: CommandAck, user: CurrentUserDep
-) -> None:
-    """The recording browser reports what a press did, after saving it."""
-    if len(invocation) > 80:
-        raise AppError("Invalid invocation", status_code=422)
-    await study_commands.get_command_bus().acknowledge(
-        user.id, invocation, payload.model_dump()
     )

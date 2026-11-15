@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import uuid
 import zipfile
@@ -11,8 +10,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.crud import study as study_crud
-from app.services import study_commands, study_export, study_source
+from app.services import study_export, study_source
 from app.services.study_export import ExportNote
 from app.worker import tasks as tasks_module
 
@@ -65,7 +63,7 @@ def test_export_is_in_capture_order_with_truthful_states() -> None:
     notes = [
         _note("b", second, 0, status="failed", text=None),
         _note("a", first, 1, status="pending", text=None, captured_ms=3_725_000),
-        _note("a", first, 0),
+        _note("a", first, 0, comment="Compare with a full scan.\n\nAsk about it."),
         _note(
             "b",
             second,
@@ -84,12 +82,15 @@ def test_export_is_in_capture_order_with_truthful_states() -> None:
     )
     assert markdown.startswith(
         "# Query plans\n\nSource: https://www.youtube.com/watch?v=VIDEO_ID\n\n"
-        "## Study session · 15 November 2026\n\n### 08:42 in this recording\n\n"
+        "## Recorded 15 November 2026\n\n### 08:42 in this recording\n\n"
         "![Query plans, captured at 08:42](images/note-001.png)\n\n"
-        "**Audio 08:27–09:03**\n\n> The database can use this index.\n"
+        "**Audio 08:27–09:03**\n\n> The database can use this index.\n\n"
+        "**My notes**\n\nCompare with a full scan.\n\nAsk about it.\n"
     )
+    # Only the note that has the owner's own words gets the heading.
+    assert markdown.count("**My notes**") == 1
     assert "### 1:02:05 in this recording" in markdown
-    assert markdown.count("## Study session") == 2
+    assert markdown.count("## Recorded ") == 2
     assert markdown.index("15 November") < markdown.index("16 November")
     for text in (
         "*Transcription pending.*",
@@ -118,58 +119,6 @@ def test_zip_opens_offline_with_relative_images() -> None:
         assert "Source:" not in document
         assert "(images/note-001.png)" in document
         assert archive.read("images/note-001.png") == b"png-a0"
-
-
-def test_shortcut_secret_is_stored_as_a_hash_only() -> None:
-    token = study_crud.new_token()
-    assert token.startswith("rtk_") and len(token) > 40
-    assert study_crud.new_token() != token
-    digest = study_crud.hash_token(token)
-    assert len(digest) == 64 and token not in digest
-
-
-async def test_a_press_reaches_the_recorder_and_gets_its_answer() -> None:
-    bus = study_commands.MemoryCommandBus()
-    user = uuid.uuid4()
-    with pytest.raises(study_commands.NotConnected):
-        await bus.deliver(user, {"invocation": "x"}, timeout=0.1)
-
-    received: list[dict] = []
-
-    async def recorder() -> None:
-        async for command in bus.listen(user, "conn", "session-1"):
-            if command is None:
-                continue
-            received.append(command)
-            await bus.acknowledge(user, command["invocation"], {"outcome": "started"})
-
-    task = asyncio.create_task(recorder())
-    await asyncio.sleep(0)
-    assert await bus.recorders(user) == {"conn": "session-1"}
-    assert await bus.recorders(uuid.uuid4()) == {}
-    answer = await bus.deliver(user, {"invocation": "p1"}, timeout=1)
-    assert answer == {"outcome": "started"} and len(received) == 1
-    # The stored answer serves a repeated press without a second delivery.
-    assert await bus.result(user, "p1") == {"outcome": "started"}
-    assert await bus.result(user, "other") is None
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert await bus.recorders(user) == {}
-
-
-async def test_a_recorder_that_does_not_confirm_times_out() -> None:
-    bus = study_commands.MemoryCommandBus()
-    user = uuid.uuid4()
-
-    async def silent() -> None:
-        async for _ in bus.listen(user, "conn", "s"):
-            pass
-
-    task = asyncio.create_task(silent())
-    await asyncio.sleep(0)
-    assert await bus.deliver(user, {"invocation": "p"}, timeout=0.05) is None
-    task.cancel()
 
 
 # --- the worker task ----------------------------------------------------------

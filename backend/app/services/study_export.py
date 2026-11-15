@@ -51,6 +51,7 @@ class ExportNote:
     text: str | None
     image: bytes | None
     source_time_url: str | None = None
+    comment: str | None = None
 
 
 def clock(ms: int) -> str:
@@ -68,7 +69,7 @@ def day(value: datetime) -> str:
 def slug(title: str) -> str:
     text = re.sub(r"[^\w\s-]", "", title, flags=re.UNICODE).strip()
     text = re.sub(r"[\s_]+", "-", text)
-    return text[:80].strip("-") or "study-notes"
+    return text[:80].strip("-") or "notebook"
 
 
 def _alt(text: str) -> str:
@@ -91,7 +92,7 @@ def build_markdown(
     for number, note in enumerate(ordered(notes), start=1):
         if note.session_id != current_session:
             current_session = note.session_id
-            lines += [f"## Study session · {day(note.session_started)}", ""]
+            lines += [f"## Recorded {day(note.session_started)}", ""]
         at = clock(note.captured_ms)
         lines += [f"### {at} in this recording", ""]
         if note.image is not None:
@@ -110,6 +111,9 @@ def build_markdown(
             lines += [quoted, ""]
         else:
             lines += [f"*{STATUS_TEXT.get(note.status, STATUS_TEXT['pending'])}*", ""]
+        if (note.comment or "").strip():
+            # Plain paragraphs, so they cannot be mistaken for the quoted speech.
+            lines += ["**My notes**", "", note.comment.strip(), ""]
     return "\n".join(lines).rstrip() + "\n", images
 
 

@@ -1,4 +1,4 @@
-/** React Query hooks for study notebooks and the keyboard-shortcut key. */
+/** React Query hooks for study notebooks. */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -14,7 +14,6 @@ export const studyKeys = {
   notebook: (workspaceId: string, notebookId: string) =>
     ["study", workspaceId, "notebook", notebookId] as const,
   image: (noteId: string) => ["study", "image", noteId] as const,
-  credential: ["study", "hotkey-credential"] as const,
 };
 
 export function useNotebooks(workspaceId: string, enabled = true) {
@@ -108,6 +107,26 @@ export function useSetNoteSourceTime(workspaceId: string, notebookId: string) {
   });
 }
 
+export function useSetNoteComment(workspaceId: string, notebookId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { noteId: string; comment: string }) =>
+      studyApi.setNoteComment(workspaceId, input.noteId, input.comment),
+    onSuccess: (saved) =>
+      // Put the saved text in place; a refetch would fight with typing.
+      qc.setQueryData<StudyNotebookDetail>(
+        studyKeys.notebook(workspaceId, notebookId),
+        (current) =>
+          current && {
+            ...current,
+            notes: current.notes.map((note) =>
+              note.id === saved.id ? saved : note,
+            ),
+          },
+      ),
+  });
+}
+
 export function useDeleteNote(workspaceId: string, notebookId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -125,67 +144,4 @@ export function useDeleteNotebook(workspaceId: string) {
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: studyKeys.notebooks(workspaceId) }),
   });
-}
-
-export function useHotkeyCredential(enabled = true) {
-  return useQuery({
-    queryKey: studyKeys.credential,
-    queryFn: studyApi.getHotkeyCredential,
-    enabled,
-  });
-}
-
-export function useCreateHotkeyCredential() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: studyApi.createHotkeyCredential,
-    onSuccess: (created) =>
-      qc.setQueryData(studyKeys.credential, { ...created, token: null }),
-  });
-}
-
-export function useRevokeHotkeyCredential() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: studyApi.revokeHotkeyCredential,
-    onSuccess: () =>
-      qc.setQueryData(studyKeys.credential, {
-        exists: false,
-        hint: null,
-        created_at: null,
-        last_used_at: null,
-        token: null,
-      }),
-  });
-}
-
-const HINT_KEY = "root_transcribe.study.shortcut";
-
-/** The key combination the learner says they assigned (this browser only). */
-export function readShortcutHint(): string {
-  try {
-    return localStorage.getItem(HINT_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function writeShortcutHint(value: string): void {
-  try {
-    if (value.trim()) localStorage.setItem(HINT_KEY, value.trim());
-    else localStorage.removeItem(HINT_KEY);
-    window.dispatchEvent(new Event("study-shortcut-hint"));
-  } catch {
-    // Private mode: the hint simply is not remembered.
-  }
-}
-
-export function useShortcutHint(): string {
-  const [hint, setHint] = useState(readShortcutHint);
-  useEffect(() => {
-    const update = () => setHint(readShortcutHint());
-    window.addEventListener("study-shortcut-hint", update);
-    return () => window.removeEventListener("study-shortcut-hint", update);
-  }, []);
-  return hint;
 }
