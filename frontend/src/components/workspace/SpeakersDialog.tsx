@@ -239,7 +239,11 @@ export function SpeakersDialog({
                                 “{suggestion.quote}”
                               </span>
                             </span>
+                            {/* type="button": these sit inside the form, and a
+                                plain button there would submit it, which
+                                saves and closes the dialog. */}
                             <Button
+                              type="button"
                               variant="secondary"
                               size="xs"
                               aria-label={t("speakerNames.listen", {
@@ -253,6 +257,7 @@ export function SpeakersDialog({
                               (decision) => (
                                 <Button
                                   key={decision}
+                                  type="button"
                                   variant="link"
                                   size="sm"
                                   disabled={decide.isPending}

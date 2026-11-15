@@ -179,6 +179,64 @@ it("finds a name in the transcript and uses it on request", async () => {
   );
 });
 
+it("stays open while names are used one by one, and closes on Save", async () => {
+  const anna = {
+    ...peter,
+    speaker_label: "SPEAKER_00",
+    name: "Anna-Karin",
+    quote: "this is Anna-Karin",
+    start_ms: 1000,
+  };
+  run = runWith({ suggestions: [anna, peter] });
+  server.use(
+    http.post(
+      `${BASE}/speaker-names/:run/suggestions/:index`,
+      async ({ request, params }) => {
+        const body = (await request.json()) as { decision: string };
+        decided.push({ index: params.index, ...body });
+        const current = run as SpeakerNameRun;
+        run = runWith({
+          suggestions: current.suggestions.map((suggestion, index) =>
+            String(index) === params.index
+              ? { ...suggestion, status: "accepted" as const }
+              : suggestion,
+          ),
+        });
+        return HttpResponse.json(run);
+      },
+    ),
+  );
+  const user = userEvent.setup();
+  const { onClose, onSeek } = showDialog();
+  // Listening to the evidence does not close the dialog either.
+  await user.click(
+    (await screen.findAllByRole("button", { name: /^Listen at/ }))[0],
+  );
+  expect(onSeek).toHaveBeenCalledWith(1000);
+  await user.click(
+    screen.getByRole("button", { name: "Use Anna-Karin for Speaker 1" }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByText("“this is Anna-Karin”")).not.toBeInTheDocument(),
+  );
+  // The second suggestion is still there to be used.
+  expect(onClose).not.toHaveBeenCalled();
+  await user.click(
+    screen.getByRole("button", { name: "Use Peter for Speaker 2" }),
+  );
+  await waitFor(() =>
+    expect(decided).toEqual([
+      { index: "0", decision: "accept" },
+      { index: "1", decision: "accept" },
+    ]),
+  );
+  expect(onClose).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  // The names were applied by "Use"; Save had nothing more to send.
+  expect(assigned).toEqual([]);
+});
+
 it("dismisses a suggestion", async () => {
   run = runWith({ suggestions: [peter] });
   const user = userEvent.setup();
