@@ -426,6 +426,7 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
     """
     task_started = time.monotonic()
     from app.services import media_validation
+    from app.services import turn_transcription as turn_stt
     from app.services.audio_store import get_audio_store
     from app.services.diarization import (
         decode_file_to_wav,
@@ -627,10 +628,20 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
             )
             _step("transcribing", "transcribe-turns")
             chunk_s = 30.0
-            aligned = []
-            for turn in turns:
-                if turn.end - turn.start < 0.2:  # too short to carry speech
+            # One speaker's turns with almost no pause between them are one
+            # stretch of speech: a sentence is not split across two requests.
+            ordered = turn_stt.join_close_turns(turns)
+            texts: list[str] = []
+            for index, turn in enumerate(ordered):
+                if turn.end - turn.start < turn_stt.MIN_TURN_SECONDS:
+                    texts.append("")  # too short to carry speech
                     continue
+                # A little real audio around the turn (never into a
+                # neighbour's speech): a cut exactly at the edges clips the
+                # first and last sound, and the word with it.
+                clip_start, clip_end = turn_stt.clip_bounds(
+                    ordered, index, wav_duration
+                )
                 parts: list[str] = []
                 cursor = turn.start
                 while cursor < turn.end:
@@ -642,7 +653,12 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                             session, aid, step="transcribe-turns"
                         )
                     upper = min(cursor + chunk_s, turn.end)
-                    clip = slice_wav(wav_path, cursor, upper)
+                    clip = slice_wav(
+                        wav_path,
+                        clip_start if cursor == turn.start else cursor,
+                        clip_end if upper == turn.end else upper,
+                        turn_stt.SILENCE_SECONDS,
+                    )
                     piece = service.transcribe_sync(
                         clip, "turn.wav", language=requested_language
                     )
@@ -651,16 +667,54 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                     if piece.text.strip():
                         parts.append(piece.text.strip())
                     cursor = upper
-                turn_text = " ".join(parts)
-                if turn_text:
-                    aligned.append(
-                        AlignedSegment(
-                            speaker=turn.speaker,
-                            start=turn.start,
-                            end=turn.end,
-                            text=turn_text,
-                        )
+                texts.append(" ".join(parts))
+
+            # A short turn ("Hej!", "Hur mår du?") is often too little audio
+            # for the model and comes back empty. Try it again with a few
+            # seconds of context and take the neighbours' known words out.
+            empty = rescued = 0
+            for index, turn in enumerate(ordered):
+                length = turn.end - turn.start
+                if (
+                    texts[index]
+                    or length < turn_stt.MIN_TURN_SECONDS
+                    or length > turn_stt.RESCUE_MAX_SECONDS
+                ):
+                    continue
+                empty += 1
+                with session_scope() as session:
+                    transcription_attempt_crud.heartbeat_sync(
+                        session, aid, step="transcribe-turns"
                     )
+                wide_start, wide_end = turn_stt.context_bounds(turn, wav_duration)
+                heard = service.transcribe_sync(
+                    slice_wav(wav_path, wide_start, wide_end, turn_stt.SILENCE_SECONDS),
+                    "context.wav",
+                    language=requested_language,
+                ).text
+                before = next((t for t in reversed(texts[:index]) if t), "")
+                after = next((t for t in texts[index + 1 :] if t), "")
+                found = turn_stt.rescue_text(heard, before, after, turn_seconds=length)
+                if found:
+                    texts[index] = found
+                    rescued += 1
+            if empty:
+                logger.info(
+                    "speaker turns came back empty",
+                    extra={
+                        "operation": "meeting.per_turn_empty",
+                        "empty": empty,
+                        "rescued": rescued,
+                        "recording_id": recording_id,
+                    },
+                )
+            aligned = [
+                AlignedSegment(
+                    speaker=turn.speaker, start=turn.start, end=turn.end, text=text
+                )
+                for turn, text in zip(ordered, texts, strict=True)
+                if text
+            ]
 
         # 4. Identify speakers against the enrolled directory (issue #6:
         # consent + exact-model candidates, several clean turns per speaker,

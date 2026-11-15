@@ -126,8 +126,10 @@ def probe_wav(wav_path: str) -> tuple[float, int]:
     return float(info.frames) / float(info.samplerate), int(info.samplerate)
 
 
-def slice_wav(wav_path: str, start: float, end: float) -> bytes:
-    """Extract ``[start, end)`` seconds of a WAV as standalone WAV bytes.
+def slice_wav(wav_path: str, start: float, end: float, pad: float = 0.0) -> bytes:
+    """Extract ``[start, end)`` seconds of a WAV as standalone WAV bytes, with
+    ``pad`` seconds of silence added at both ends (a speech model handles a
+    clip that begins and ends in silence better than one cut mid-sound).
 
     Used by the per-turn transcription fallback: when the STT server returns no
     word timestamps, each diarized turn's audio is transcribed individually, so
@@ -144,6 +146,11 @@ def slice_wav(wav_path: str, start: float, end: float) -> bytes:
         last = min(len(f), int(end * sr))
         f.seek(first)
         data = f.read(frames=max(0, last - first), dtype="float32", always_2d=True)
+    if pad > 0:
+        import numpy as np
+
+        silence = np.zeros((int(pad * sr), data.shape[1]), dtype="float32")
+        data = np.concatenate([silence, data, silence])
     buf = io.BytesIO()
     sf.write(buf, data, sr, format="WAV", subtype="PCM_16")
     return buf.getvalue()

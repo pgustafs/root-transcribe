@@ -105,9 +105,13 @@ def _wire_pipeline(
         calls["stt_languages"].append(language)
         if isinstance(stt_result, Exception):
             raise stt_result
-        if filename == "turn.wav":
-            # Per-turn fallback slice: echo a text derived from the clip marker.
-            return SimpleNamespace(text=f"turn-text-{audio.decode()}", language="en")
+        if filename in ("turn.wav", "context.wav"):
+            # Per-turn fallback slice: echo a text derived from the clip marker
+            # (or what a test says the model hears in that clip).
+            marker = audio.decode()
+            heard = calls.get("heard", {})
+            text = heard.get(marker, f"turn-text-{marker}")
+            return SimpleNamespace(text=text, language="en")
         return stt_result
 
     monkeypatch.setattr(
@@ -123,7 +127,7 @@ def _wire_pipeline(
     )
     monkeypatch.setattr(
         "app.services.diarization.slice_wav",
-        lambda path, start, end: f"{start:.1f}-{end:.1f}".encode(),
+        lambda path, start, end, pad=0.0: f"{start:.1f}-{end:.1f}".encode(),
     )
 
     @contextmanager
@@ -387,9 +391,11 @@ def test_transcribe_attempt_per_turn_fallback_without_word_timestamps(
         "SPEAKER_01",
         "SPEAKER_00",
     ]
-    # Each segment's text is its own turn's transcription (slice marker echoed).
-    assert segs[0]["text"] == "turn-text-0.0-9.5"
-    assert segs[1]["text"] == "turn-text-10.0-19.5"
+    # Each segment's text is its own turn's transcription (slice marker
+    # echoed). The clip is the turn plus a 0.2 s margin, never past the
+    # midpoint to the next turn and never before the start of the recording.
+    assert segs[0]["text"] == "turn-text-0.0-9.7"
+    assert segs[1]["text"] == "turn-text-9.8-19.7"
 
 
 def test_transcribe_attempt_skips_full_pass_for_large_audio(
@@ -416,7 +422,7 @@ def test_transcribe_attempt_skips_full_pass_for_large_audio(
     # No full-file call — only the per-turn slice.
     assert calls["stt_calls"] == ["turn.wav"]
     (seg,) = calls["segments"]
-    assert seg["text"] == "turn-text-0.0-9.5"
+    assert seg["text"] == "turn-text-0.0-9.7"
     # Duration comes from the waveform itself (40s fake), not the STT response;
     # language comes from the first per-turn slice.
     assert calls["finish"] == [
@@ -444,6 +450,88 @@ def test_per_turn_transcription_subchunks_long_turns(
     (seg,) = calls["segments"]
     assert (seg["start_ms"], seg["end_ms"]) == (0, 70_000)
     assert seg["text"] == ("turn-text-0.0-30.0 turn-text-30.0-60.0 turn-text-60.0-70.0")
+
+
+def test_a_sentence_split_by_speaker_detection_is_transcribed_in_one_piece(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two turns of one speaker 0.3 s apart are one request and one line."""
+    stt = SimpleNamespace(
+        words=[], text="", language="sv", duration=30.0, has_word_timestamps=False
+    )
+    turns = [
+        SpeakerTurn("SPEAKER_00", 15.0, 19.6),
+        SpeakerTurn("SPEAKER_00", 19.9, 21.5),
+        SpeakerTurn("SPEAKER_01", 23.0, 24.0),
+    ]
+    calls = _wire_pipeline(monkeypatch, stt_result=stt, turns=turns)
+    calls["heard"] = {
+        "14.8-21.7": "Du, jag undrar, vet du hur långt det är mellan Stockholm "
+        "och Sälen med bil?",
+        "22.8-24.2": "Jag vet inte.",
+    }
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    segs = calls["segments"]
+    assert [(s["speaker_label"], s["start_ms"], s["end_ms"]) for s in segs] == [
+        ("SPEAKER_00", 15000, 21500),
+        ("SPEAKER_01", 23000, 24000),
+    ]
+    assert segs[0]["text"].endswith("mellan Stockholm och Sälen med bil?")
+    assert calls["stt_calls"].count("turn.wav") == 2
+
+
+def test_short_turns_that_come_back_empty_are_heard_again_with_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A short reply is too little audio for the model and comes back empty.
+    It is transcribed again with context, and the neighbours' words, already
+    known, are taken out: the reply is kept, under its own speaker and time."""
+    stt = SimpleNamespace(
+        words=[], text="", language="sv", duration=20.0, has_word_timestamps=False
+    )
+    turns = [
+        SpeakerTurn("SPEAKER_00", 1.0, 1.6),  # "Hej!"
+        SpeakerTurn("SPEAKER_01", 1.9, 2.4),  # "Hej!" (the reply: empty)
+        SpeakerTurn("SPEAKER_00", 3.0, 5.5),
+        SpeakerTurn("SPEAKER_01", 10.0, 12.0),
+        SpeakerTurn("SPEAKER_01", 12.6, 13.4),  # "Hur mår du?" (empty)
+        SpeakerTurn("SPEAKER_00", 14.0, 15.2),
+        SpeakerTurn("SPEAKER_01", 17.0, 18.0),  # a cough: nothing to find
+    ]
+    calls = _wire_pipeline(monkeypatch, stt_result=stt, turns=turns)
+    calls["heard"] = {
+        "0.8-1.8": "Hej!",
+        "1.8-2.6": "",
+        "2.8-5.7": "Jag heter Peter. Vad heter du?",
+        "9.8-12.2": "Jag mår bra men lite trött.",
+        "12.4-13.6": " ",
+        "13.8-15.4": "Jag mår också bra.",
+        "16.8-18.2": "",
+        # The same moments with 2.5 s on each side.
+        "0.0-4.9": "Hej! Hej! Jag heter Peter. Vad heter",
+        "10.1-15.9": "bra, men lite trött. Hur mår du? Jag mår också bra.",
+        "14.5-20.5": "Jag mår också bra.",
+    }
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    segs = calls["segments"]
+    assert [(s["speaker_label"], s["text"]) for s in segs] == [
+        ("SPEAKER_00", "Hej!"),
+        ("SPEAKER_01", "Hej!"),
+        ("SPEAKER_00", "Jag heter Peter. Vad heter du?"),
+        ("SPEAKER_01", "Jag mår bra men lite trött."),
+        ("SPEAKER_01", "Hur mår du?"),
+        ("SPEAKER_00", "Jag mår också bra."),
+    ]
+    # The rescued replies keep the time the diarization gave them.
+    assert (segs[1]["start_ms"], segs[1]["end_ms"]) == (1900, 2400)
+    assert (segs[4]["start_ms"], segs[4]["end_ms"]) == (12600, 13400)
+    # One extra request per empty turn, nothing more.
+    assert calls["stt_calls"].count("context.wav") == 3
+    assert calls["stt_calls"].count("turn.wav") == 7
 
 
 def test_transcribe_attempt_failure_persists_then_reraises(

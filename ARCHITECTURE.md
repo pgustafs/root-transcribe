@@ -254,6 +254,16 @@ Word alignment chooses the speaker turn with greatest overlap, or the nearest
 turn when a word falls in a gap. Overlapping speech and model errors can still
 require manual correction; numbered speaker labels are not verified identities.
 
+In the per-turn path, consecutive turns of one speaker less than 0.5 s apart
+are first joined (up to 30 s), so a sentence that speaker detection split is
+sent in one piece. Each turn's clip then gets 0.2 s of real audio on each side
+(never past the midpoint to the neighbouring turn) and 0.3 s of silence at both
+ends, because a clip cut exactly at the turn's edges loses its first and last
+word. A turn of at most 8 s that still comes back empty (a short reply is too
+little audio for the model) is transcribed once more with 2.5 s of context on
+each side; the neighbouring turns' words, already known, are matched away and
+what is left is the turn (`services/turn_transcription.py`).
+
 The worker streams compressed audio to disk and decodes file-to-file, but
 pyannote loads the complete decoded waveform into memory. Long recordings still
 need memory sizing; this is asynchronous processing after upload, not live
