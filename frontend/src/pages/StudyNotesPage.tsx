@@ -216,7 +216,9 @@ function NoteImage({
     note.image_width && note.image_height
       ? `${note.image_width} / ${note.image_height}`
       : "16 / 9";
-  if (!note.has_image || failed) {
+  // A note from a microphone recording never had a picture.
+  if (!note.has_image) return null;
+  if (failed) {
     return (
       <div
         className="flex w-full shrink-0 items-center justify-center rounded-md border bg-muted p-3 text-center text-xs text-muted-foreground sm:w-56"

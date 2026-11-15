@@ -138,7 +138,7 @@ describe("crop", () => {
 
 // --- the controller ----------------------------------------------------------
 
-function fakeSource(buffer: TabAudioBuffer | null) {
+function fakeSource(buffer: TabAudioBuffer | null, hasVideo = true) {
   let lost: (() => void) | null = null;
   let live = true;
   let frames = 0;
@@ -149,9 +149,10 @@ function fakeSource(buffer: TabAudioBuffer | null) {
   const encoded: number[] = [];
   const source: CaptureSource = {
     buffer,
-    hasVideo: true,
+    hasVideo,
     isLive: () => live,
     grab: async () => {
+      if (!hasVideo) throw new Error("No video is shared");
       frames += 1;
       const taken = frames;
       const shown = picture;
@@ -216,9 +217,13 @@ async function setup(
   mode: store.StudyMode,
   withAudio = true,
   offerSlides = false,
+  audioOnly = false,
 ) {
   const buffer = withAudio ? new TabAudioBuffer(RATE, 15, 5) : null;
-  const { source, lose, show, released, encoded } = fakeSource(buffer);
+  const { source, lose, show, released, encoded } = fakeSource(
+    buffer,
+    !audioOnly,
+  );
   const backend = fakeApi();
   let clock = 0;
   let paused = false;
@@ -243,6 +248,7 @@ async function setup(
       mode,
       localRecordingId: "local-1",
       offerSlides,
+      audioOnly,
     },
     {} as MediaStream,
   );
@@ -551,6 +557,56 @@ describe("study note controller", () => {
       audioStartMs: number;
     };
     expect(plain.audioStartMs).toBe(75_000);
+  });
+
+  it("takes notes from the microphone, without a picture", async () => {
+    const t = await setup("until_stopped", true, false, true);
+    expect(t.status()).toMatchObject({
+      audioOnly: true,
+      audioAvailable: true,
+      videoAvailable: false,
+    });
+    t.buffer?.append(ramp(0, 7000)); // 70 seconds said in the room
+    t.setClock(70_000);
+    // A question: the last minute, and no frame is asked for.
+    const asked = await t.controller.question();
+    expect(asked).toMatchObject({
+      outcome: "saved",
+      audio_start_ms: 10_000,
+      audio_end_ms: 70_000,
+    });
+    // An ordinary note opens and closes as usual.
+    await t.controller.toggle();
+    expect(t.status().openSinceMs).toBe(70_000);
+    t.buffer?.append(ramp(7000, 300));
+    await t.controller.toggle();
+    await vi.waitFor(() => expect(t.backend.notes.size).toBe(2));
+    const sent = [...t.backend.notes.values()] as {
+      image: Blob | null;
+      audio: Blob | null;
+      tags: string[];
+    }[];
+    expect(sent.map((note) => note.image)).toEqual([null, null]);
+    expect(sent.every((note) => note.audio !== null)).toBe(true);
+    expect(sent.map((note) => note.tags)).toEqual([["question"], []]);
+    expect(t.encoded).toEqual([]);
+    // The microphone goes away: the reason is the microphone, not a tab.
+    t.lose();
+    await vi.waitFor(() => expect(t.status().audioAvailable).toBe(false));
+    expect(t.status().notice).toBe("mic_lost");
+    expect(await t.controller.question()).toEqual({
+      outcome: "error",
+      reason: "mic_lost",
+    });
+  });
+
+  it("keeps nothing when the microphone has heard nothing yet", async () => {
+    const t = await setup("last_15s", true, false, true);
+    expect(await t.controller.toggle()).toEqual({
+      outcome: "error",
+      reason: "no_audio",
+    });
+    expect(t.backend.notes.size).toBe(0);
   });
 });
 

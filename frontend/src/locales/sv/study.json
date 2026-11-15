@@ -22,7 +22,8 @@
     "enrich": "Förbättra anteckningar med AI",
     "enrichHelp": "Lägger till en rubrik, en städad version av texten, nyckelbegrepp och texten på bilden. Bilden och texten i varje anteckning skickas till den här installationens språkmodell.",
     "researchWeb": "Undersök frågor på webben",
-    "researchWebHelp": "När du trycker på Fråga skickas själva frågan (aldrig inspelningen eller transkriptet) till söktjänsten Tavily. Svaret listar sidorna som användes."
+    "researchWebHelp": "När du trycker på Fråga skickas själva frågan (aldrig inspelningen eller transkriptet) till söktjänsten Tavily. Svaret listar sidorna som användes.",
+    "enableHelpMic": "Spara det som just sades, märk det eller få ett föreslaget svar på en fråga. Anteckningarna använder mikrofonen och har ingen bild. Hela inspelningen sparas också."
   },
   "crop": {
     "title": "Välj vad som ska sparas",
@@ -66,15 +67,20 @@
       "storage": "Anteckningen kunde inte sparas i den här webbläsaren.",
       "not_recording": "Ingen inspelning pågår.",
       "source_changed": "Den öppna anteckningen avslutades eftersom källan byttes.",
-      "offer_gone": "Den bilden kan inte längre sparas."
+      "offer_gone": "Den bilden kan inte längre sparas.",
+      "mic_lost": "Den öppna anteckningen avslutades eftersom mikrofonen inte längre är tillgänglig.",
+      "no_audio": "Inget har hörts ännu, så det finns inget att spara."
     },
     "cancelAlsoNotes_one": "Den {{count}} anteckning som togs i den kastas också.",
-    "cancelAlsoNotes_other": "De {{count}} anteckningar som togs i den kastas också."
+    "cancelAlsoNotes_other": "De {{count}} anteckningar som togs i den kastas också.",
+    "micLost": "Mikrofonen är inte längre tillgänglig, så inga anteckningar kan tas."
   },
   "float": {
     "ready": "Redo",
     "videoLost": "Fliken delas inte längre.",
-    "notRecording": "Ingen inspelning pågår."
+    "notRecording": "Ingen inspelning pågår.",
+    "micLost": "Mikrofonen är inte tillgänglig.",
+    "readyMic": "Lyssnar"
   },
   "changeSource": {
     "title": "Byt källa",

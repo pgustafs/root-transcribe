@@ -58,12 +58,21 @@ async def _start(client, wid, headers, notebook_id, **body) -> str:
 
 
 async def _put_note(
-    client, wid, headers, session_id, seq, *, audio=True, note_id=None, **extra
+    client,
+    wid,
+    headers,
+    session_id,
+    seq,
+    *,
+    audio=True,
+    image=True,
+    note_id=None,
+    **extra,
 ):
     note_id = note_id or str(uuid.uuid4())
     data = {"session_id": session_id, "seq": str(seq), "captured_ms": "522000"}
     data |= extra
-    files = {"image": ("frame.png", PNG, "image/png")}
+    files = {"image": ("frame.png", PNG, "image/png")} if image else {}
     if audio:
         data |= {"audio_start_ms": "507000", "audio_end_ms": "543000"}
         files["audio"] = ("note.wav", WAV, "audio/wav")
@@ -507,3 +516,45 @@ async def test_a_marked_question_is_queued_for_an_answer(
         for row in (await db_session.execute(select(TaskOutbox))).scalars().all()
     ]
     assert names.count("tasks.answer_study_question") == 2
+
+
+async def test_a_note_from_a_microphone_recording_has_no_image(
+    client: AsyncClient,
+    user_token_headers: dict,
+    meetings_enabled: _FakeAudioStore,
+    db_session: AsyncSession,
+) -> None:
+    wid = await _make_workspace(client, user_token_headers)
+    notebook = await _notebook(client, wid, user_token_headers, title="Planning")
+    session_id = await _start(client, wid, user_token_headers, notebook["id"])
+    note_id, resp = await _put_note(
+        client, wid, user_token_headers, session_id, 0, image=False, tags="question"
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["has_image"] is False and body["status"] == "pending"
+    assert (body["image_width"], body["image_height"]) == (None, None)
+    assert list(meetings_enabled.blobs) == [
+        k for k in meetings_enabled.blobs if k.endswith(".wav")
+    ]
+    base = f"{API}/workspaces/{wid}/study"
+    image = await client.get(
+        f"{base}/notes/{note_id}/image", headers=user_token_headers
+    )
+    assert image.status_code == 404
+    # Neither picture nor sound is not a note.
+    _, empty = await _put_note(
+        client, wid, user_token_headers, session_id, 1, image=False, audio=False
+    )
+    assert empty.status_code == 422
+    # The export has the text and simply no picture.
+    note = await db_session.get(StudyNote, uuid.UUID(note_id))
+    note.status, note.text = "ready", "Vem äger budgeten?"
+    await db_session.commit()
+    export = await client.get(
+        f"{base}/notebooks/{notebook['id']}/export", headers=user_token_headers
+    )
+    with zipfile.ZipFile(io.BytesIO(export.content)) as archive:
+        assert archive.namelist() == ["Planning.md"]
+        document = archive.read("Planning.md").decode()
+    assert "> Vem äger budgeten?" in document and "![" not in document

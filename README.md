@@ -791,6 +791,18 @@ The floating window needs Chrome or Edge 116 or later. It is a window of its
 own, so it is never part of a saved frame. With the window focused, Space or
 Enter presses the button.
 
+### Notes in a meeting without a shared tab
+
+**Take notes** can also be switched on for an ordinary recording, for example
+a meeting where everyone is in one room. Notes then use the **microphone**:
+Take note, the marks, the quick thought and **Question** work the same way,
+and a note has its transcript but no picture. There is no source link, crop
+step or slide offer, because there is no tab. The buttons are in the recording
+bar; **Show floating button** opens the small window if you want it.
+
+When a tab *is* shared, notes keep using the tab's audio only, so your own
+voice stays out of them.
+
 ### Marks, a quick thought and slide changes
 
 Next to **Take note**, in the floating window and in the recording bar:
@@ -833,10 +845,12 @@ transcripts, slide text, thoughts, terms) and filtered by mark.
 
 ### Question: an answer while the meeting goes on
 
-When somebody asks a question in a web meeting, press **Question** (in the
-floating window or the recording bar). It needs the text model.
+When somebody asks a question, in a web meeting or in the room, press
+**Question** (in the floating window or the recording bar). It needs the text
+model.
 
-1. The last **minute** of the tab's audio is kept as a note of its own (an
+1. The last **minute** of audio (the tab's, or the microphone's when no tab is
+   shared) is kept as a note of its own (an
    open note is not affected), and transcribed.
 2. The model picks the question out of what was said and shows it back, with a
    first short answer when it is sure of one. This appears in the floating

@@ -135,6 +135,29 @@ it("dock: explains why no note can be taken", () => {
   ).toBeInTheDocument();
 });
 
+it("dock: notes from the microphone need no shared tab", async () => {
+  const study = dock({ audioOnly: true, videoAvailable: false });
+  // Everything works without a picture, and nothing complains about a tab.
+  for (const name of ["Take note", "Important", "Don't understand", "Question"])
+    expect(screen.getByRole("button", { name })).toBeEnabled();
+  expect(
+    screen.queryByText(/shared tab is no longer available/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Change source" }),
+  ).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Question" }));
+  expect(study.actions.onQuestion).toHaveBeenCalledOnce();
+});
+
+it("dock: says when the microphone for notes is gone", () => {
+  dock({ audioOnly: true, videoAvailable: false, audioAvailable: false });
+  expect(screen.getByRole("button", { name: "Question" })).toBeDisabled();
+  expect(
+    screen.getByText(/microphone is no longer available/),
+  ).toBeInTheDocument();
+});
+
 it("dock: says when notes are screenshots only", () => {
   dock({ audioAvailable: false });
   expect(screen.getByRole("button", { name: "Take note" })).toBeEnabled();
@@ -693,6 +716,18 @@ it("notebook: a question shows its answer and can be tried again", async () => {
       "Finding the question…",
     ),
   ).toBeInTheDocument();
+});
+
+it("notebook: a note without a picture shows none", async () => {
+  notebookPage([
+    note(0, { has_image: false, image_width: null, image_height: null }),
+  ]);
+  const entry = within(await screen.findByRole("article"));
+  expect(
+    entry.getByText("The database can use this index."),
+  ).toBeInTheDocument();
+  expect(entry.queryByRole("button", { name: /View image/ })).toBeNull();
+  expect(entry.queryByText("The image is no longer stored.")).toBeNull();
 });
 
 it("notebook: a refused export says why", async () => {

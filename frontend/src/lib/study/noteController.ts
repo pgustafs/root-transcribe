@@ -7,6 +7,10 @@
  * clicks can never act on the same state twice. A press can carry a mark
  * ("important", "unclear") and a thought the learner typed.
  *
+ * Notes can also come from a recording without a shared tab (a meeting in one
+ * room): the source is then the microphone, and a note has sound but no
+ * picture.
+ *
  * The shared tab is also watched for slide changes: when a still picture is
  * replaced by another, the one that went away is offered as a note for a
  * short while, with the talk that came before the change.
@@ -79,9 +83,10 @@ export type PinnedFrame = {
 /** What a press can carry besides the frame and the audio. */
 export type PressExtra = { thought?: string };
 
-/** What the shared tab gives us: frames and (maybe) audio. */
+/** What notes are taken from: a shared tab (frames and maybe audio) or the
+ * microphone (audio only). */
 export type CaptureSource = {
-  /** Null when the tab was shared without sound. */
+  /** Null when there is no sound to take notes from. */
   buffer: TabAudioBuffer | null;
   hasVideo: boolean;
   isLive: () => boolean;
@@ -110,6 +115,8 @@ export type StudyStatus = {
   offer: { id: string; capturedMs: number } | null;
   /** The note of the question that was marked last (its answer is shown). */
   questionNoteId: string | null;
+  /** Notes come from the microphone and have no picture. */
+  audioOnly: boolean;
   /** Notes taken in this recording. */
   count: number;
   /** Notes not yet confirmed by the server. */
@@ -133,6 +140,7 @@ export const IDLE_STUDY: StudyStatus = {
   openTags: [],
   offer: null,
   questionNoteId: null,
+  audioOnly: false,
   count: 0,
   waiting: 0,
   audioAvailable: false,
@@ -140,6 +148,11 @@ export const IDLE_STUDY: StudyStatus = {
   notice: null,
   savedTick: 0,
 };
+
+/** Is there something to take a note from right now? */
+export function sourceAvailable(status: StudyStatus): boolean {
+  return status.audioOnly ? status.audioAvailable : status.videoAvailable;
+}
 
 export type BeginOptions = {
   workspaceId: string;
@@ -154,6 +167,8 @@ export type BeginOptions = {
   offerSlides?: boolean;
   /** Questions may be researched on the web. */
   researchWeb?: boolean;
+  /** The source is the microphone: notes have sound and no picture. */
+  audioOnly?: boolean;
 };
 
 export type ControllerDeps = {
@@ -226,7 +241,7 @@ export async function createCaptureSource(
   return {
     buffer,
     hasVideo: grabber !== null,
-    isLive: () => grabber?.live ?? false,
+    isLive: () => (grabber ? grabber.live : audioTrack?.readyState === "live"),
     grab: async () => {
       if (!grabber) throw new Error("No video is shared");
       const frame = await grabber.grab();
@@ -243,7 +258,7 @@ export async function createCaptureSource(
       };
     },
     onLost: (listener) => {
-      videoTrack?.addEventListener("ended", listener);
+      (videoTrack ?? audioTrack)?.addEventListener("ended", listener);
     },
     onTick: (listener) => {
       ticks.add(listener);
@@ -301,7 +316,7 @@ async function flushOnce(
   );
   for (const note of await store.listNotesInState("queued")) {
     const session = sessions.get(note.sessionId);
-    if (!session || !note.image) {
+    if (!session || (!note.image && !note.hasAudio)) {
       await store.markUploaded(note.id);
       continue;
     }
@@ -569,6 +584,7 @@ export class StudyNoteController {
         enrich: options.enrich ?? true,
         offerSlides: options.offerSlides ?? false,
         researchWeb: options.researchWeb ?? false,
+        audioOnly: options.audioOnly ?? false,
         localRecordingId: options.localRecordingId,
         recordingId: null,
         linked: false,
@@ -586,10 +602,15 @@ export class StudyNoteController {
           if (this.source !== source) return;
           await this.finishOpen("sharing_lost");
           this.forgetSlides(true);
-          this.set({ videoAvailable: false, notice: "sharing_lost" });
+          this.set(
+            session.audioOnly
+              ? { audioAvailable: false, notice: "mic_lost" }
+              : { videoAvailable: false, notice: "sharing_lost" },
+          );
         });
       });
-      if (session.offerSlides) source.onTick(() => this.tick(source));
+      if (session.offerSlides && source.hasVideo)
+        source.onTick(() => this.tick(source));
       flushListeners.add(this.onFlush);
       this.set({
         ...IDLE_STUDY,
@@ -601,6 +622,7 @@ export class StudyNoteController {
         mode: session.mode,
         audioAvailable: source.buffer !== null,
         videoAvailable: source.hasVideo,
+        audioOnly: Boolean(session.audioOnly),
         savedTick: this.status.savedTick,
       });
       await this.refreshCounts();
@@ -699,8 +721,8 @@ export class StudyNoteController {
       return { outcome: "error", reason: "not_recording" };
     if (action.kind === "question") {
       if (this.deps.isPaused()) return { outcome: "error", reason: "paused" };
-      if (!this.source.hasVideo || !this.source.isLive())
-        return { outcome: "error", reason: "sharing_lost" };
+      if (!this.canTake())
+        return { outcome: "error", reason: this.lostReason() };
       return this.captureQuestion((action.thought ?? "").trim());
     }
     const open = this.open;
@@ -722,12 +744,28 @@ export class StudyNoteController {
       };
     }
     if (this.deps.isPaused()) return { outcome: "error", reason: "paused" };
-    if (!this.source.hasVideo || !this.source.isLive())
-      return { outcome: "error", reason: "sharing_lost" };
+    if (!this.canTake()) return { outcome: "error", reason: this.lostReason() };
     return this.capture(
       action.tag ? [action.tag] : [],
       (action.thought ?? "").trim(),
     );
+  }
+
+  /** A live source with something to keep: a picture, or (from the
+   * microphone) sound. */
+  private canTake(): boolean {
+    const source = this.source;
+    if (!source || !source.isLive()) return false;
+    return this.session?.audioOnly ? source.buffer !== null : source.hasVideo;
+  }
+
+  private lostReason(): string {
+    return this.session?.audioOnly ? "mic_lost" : "sharing_lost";
+  }
+
+  /** The frame that is showing, or nothing when there is no picture. */
+  private pin(source: CaptureSource): Promise<PinnedFrame | null> {
+    return source.hasVideo ? source.grab() : Promise.resolve(null);
   }
 
   /** Keep the open note's marks and thought safe from a reload. */
@@ -753,7 +791,7 @@ export class StudyNoteController {
     const buffer = source.buffer;
     // Pin the frame and the end of the look-back together, before any
     // encoding or storage work.
-    const pinning = source.grab();
+    const pinning = this.pin(source);
     const keepOpen = session.mode === "until_stopped" && buffer !== null;
     const writes: Promise<void>[] = [];
     let lookbackSamples = 0;
@@ -771,7 +809,7 @@ export class StudyNoteController {
       0,
       capturedMs - samplesToMs(lookbackSamples, rate),
     );
-    let pinned: PinnedFrame;
+    let pinned: PinnedFrame | null;
     let seq: number;
     try {
       pinned = await pinning;
@@ -803,7 +841,7 @@ export class StudyNoteController {
     if (keepOpen) {
       // The note is open from now on; its image is stored in the background.
       const stored = (async () => {
-        const image = await pinned.encode(crop);
+        const image = pinned ? await pinned.encode(crop) : null;
         await store.putNote({ ...base, image });
       })();
       stored.catch(() => {});
@@ -859,7 +897,7 @@ export class StudyNoteController {
     const source = this.source as CaptureSource;
     const capturedMs = Math.max(0, Math.round(this.deps.clock()));
     const id = this.newId();
-    const pinning = source.grab();
+    const pinning = this.pin(source);
     const lookback = source.buffer?.lookback(QUESTION_LOOKBACK_SECONDS) ?? null;
     const rate = source.buffer?.sampleRate ?? NOTE_SAMPLE_RATE;
     const pinned = await pinning;
@@ -893,13 +931,15 @@ export class StudyNoteController {
   /** Encode and store a note that is complete at once. */
   private async storeComplete(
     base: StoredNote,
-    pinned: PinnedFrame,
+    pinned: PinnedFrame | null,
     crop: Crop,
     lookback: Float32Array | null,
     audioEndMs: number,
   ): Promise<PressResult> {
     const hasAudio = lookback !== null && lookback.length > 0;
-    const image = await pinned.encode(crop);
+    const image = pinned ? await pinned.encode(crop) : null;
+    // Neither a picture nor a sound: there is nothing to keep.
+    if (!image && !hasAudio) return { outcome: "error", reason: "no_audio" };
     await store.putNote({
       ...base,
       image,

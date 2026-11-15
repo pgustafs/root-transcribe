@@ -22,6 +22,8 @@ type Props = {
   /** Suggested notebook title (the recording title). */
   suggestedTitle: string;
   showMode?: boolean;
+  /** Ask for the source's link (a video); not for a meeting in a room. */
+  showSource?: boolean;
 };
 
 export function StudySourceFields({
@@ -31,6 +33,7 @@ export function StudySourceFields({
   notebooks,
   suggestedTitle,
   showMode = true,
+  showSource = true,
 }: Props) {
   const { t } = useTranslation("study");
   const key = sourceKey(choice.sourceUrl);
@@ -67,7 +70,10 @@ export function StudySourceFields({
       )}
       {isNew && (
         <>
-          <Field data-invalid={invalid || undefined}>
+          <Field
+            data-invalid={invalid || undefined}
+            className={showSource ? undefined : "hidden"}
+          >
             <FieldLabel htmlFor={`${idPrefix}-source`}>
               {t("setup.sourceUrl")}
             </FieldLabel>

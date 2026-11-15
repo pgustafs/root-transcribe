@@ -5,7 +5,7 @@ import {
   type NoteCaptureActions,
   NoteCaptureControls,
 } from "@/components/study/NoteCaptureControls";
-import type { StudyStatus } from "@/lib/study/noteController";
+import { sourceAvailable, type StudyStatus } from "@/lib/study/noteController";
 import { FLOAT_SIZE } from "@/lib/study/studyChoice";
 import { formatMsClock } from "@/utils/formatDuration";
 
@@ -56,20 +56,22 @@ export function FloatingNotePanel({
     },
   };
   const noteOpen = status.openSinceMs !== null;
-  const canCapture = status.videoAvailable && recording;
+  const canCapture = sourceAvailable(status) && recording;
 
   let line: string;
   if (noteOpen)
     line = t("dock.capturing", {
       time: formatMsClock(Math.max(0, durationMs - (status.openSinceMs ?? 0))),
     });
-  else if (!status.videoAvailable) line = t("float.videoLost");
+  else if (!sourceAvailable(status))
+    line = status.audioOnly ? t("float.micLost") : t("float.videoLost");
   else if (paused) line = t("dock.pausedHint");
   else if (!recording) line = t("float.notRecording");
   else if (status.offer) line = t("offer.line");
   else if (status.notice && status.notice !== "paused")
     line = t(`dock.notice.${status.notice}`, { defaultValue: status.notice });
   else if (!status.audioAvailable) line = t("dock.screenshotOnly");
+  else if (status.audioOnly && status.count === 0) line = t("float.readyMic");
   else
     line =
       status.count > 0

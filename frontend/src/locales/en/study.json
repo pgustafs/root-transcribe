@@ -22,7 +22,8 @@
     "enrich": "Improve notes with AI",
     "enrichHelp": "Adds a title, a tidy version of the text, key terms and the text on the slide. The image and the text of each note are sent to this installation's language model.",
     "researchWeb": "Research questions on the web",
-    "researchWebHelp": "When you press Question, the question itself (never the recording or its transcript) is sent to the Tavily search service. The answer lists the pages it used."
+    "researchWebHelp": "When you press Question, the question itself (never the recording or its transcript) is sent to the Tavily search service. The answer lists the pages it used.",
+    "enableHelpMic": "Keep what was just said, mark it, or get a suggested answer to a question. Notes use the microphone and have no picture. The full recording is saved as well."
   },
   "crop": {
     "title": "Choose what to save",
@@ -66,15 +67,20 @@
       "storage": "The note could not be saved in this browser.",
       "not_recording": "No recording is running.",
       "source_changed": "The open note ended because the source changed.",
-      "offer_gone": "That slide can no longer be kept."
+      "offer_gone": "That slide can no longer be kept.",
+      "mic_lost": "The open note ended because the microphone is no longer available.",
+      "no_audio": "Nothing has been heard yet, so there is nothing to keep."
     },
     "cancelAlsoNotes_one": "The {{count}} note taken in it is discarded too.",
-    "cancelAlsoNotes_other": "The {{count}} notes taken in it are discarded too."
+    "cancelAlsoNotes_other": "The {{count}} notes taken in it are discarded too.",
+    "micLost": "The microphone is no longer available, so no notes can be taken."
   },
   "float": {
     "ready": "Ready",
     "videoLost": "The tab is no longer shared.",
-    "notRecording": "No recording is running."
+    "notRecording": "No recording is running.",
+    "micLost": "The microphone is not available.",
+    "readyMic": "Listening"
   },
   "changeSource": {
     "title": "Change source",

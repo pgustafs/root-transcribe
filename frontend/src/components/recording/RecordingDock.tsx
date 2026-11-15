@@ -13,7 +13,7 @@ import {
   type NoteCaptureActions,
   NoteCaptureControls,
 } from "@/components/study/NoteCaptureControls";
-import type { StudyStatus } from "@/lib/study/noteController";
+import { sourceAvailable, type StudyStatus } from "@/lib/study/noteController";
 import {
   formatDuration as formatSeconds,
   formatMsClock,
@@ -100,7 +100,7 @@ export function RecordingDock({
   // New captures need a live shared tab and a running recording; an open
   // note can always be stopped.
   const canCapture =
-    Boolean(notes?.videoAvailable) && status === "recording" && !busy;
+    Boolean(notes && sourceAvailable(notes)) && status === "recording" && !busy;
 
   return (
     <div className="flex flex-col gap-4">
@@ -218,9 +218,11 @@ export function RecordingDock({
               ? t("study:dock.viewNotes", { count: notes.count })
               : t("study:dock.viewNotesNone")}
           </Button>
-          <Button onClick={study.onChangeSource} variant="ghost" size="sm">
-            {t("study:dock.changeSource")}
-          </Button>
+          {!notes.audioOnly && (
+            <Button onClick={study.onChangeSource} variant="ghost" size="sm">
+              {t("study:dock.changeSource")}
+            </Button>
+          )}
           {study.floating && (
             <Button
               onClick={study.floating.onToggle}
@@ -299,7 +301,7 @@ export function RecordingDock({
                 </Alert>
               </div>
             )}
-            {notes && !notes.videoAvailable && (
+            {notes && !notes.audioOnly && !notes.videoAvailable && (
               <div>
                 <Alert
                   variant="warning"
@@ -308,8 +310,18 @@ export function RecordingDock({
                 />
               </div>
             )}
+            {notes && notes.audioOnly && !notes.audioAvailable && (
+              <div>
+                <Alert
+                  variant="warning"
+                  isInline={true}
+                  title={t("study:dock.micLost")}
+                />
+              </div>
+            )}
             {notes?.notice &&
               notes.notice !== "sharing_lost" &&
+              notes.notice !== "mic_lost" &&
               notes.notice !== "paused" && (
                 <div>
                   <Alert

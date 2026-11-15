@@ -161,6 +161,11 @@ transcript of a short piece of the tab's audio.
   columns on `study_note` (`title`, `clean_text`, `slide_text`, `terms`,
   `explanation`, `enrich_status`); `text` is never changed. Off when
   `LLM_BASE_URL` is empty or the session was started with `enrich=false`.
+- **Without a shared tab.** A session started with `audioOnly` takes its
+  notes from the recorder's microphone stream instead of a display stream.
+  The capture source then has an audio tap and no frame grabber; notes are
+  uploaded without an image (`PUT …/study/notes/{id}` accepts audio alone)
+  and `image_key` stays empty.
 - **Questions.** A note marked `question` is captured with a 60-second
   look-back. `tasks.answer_study_question` runs after its transcription:
   (1) `POST /chat` extracts the question, search words and a first answer,

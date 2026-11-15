@@ -218,7 +218,8 @@ export type NoteUpload = {
   sessionId: string;
   seq: number;
   capturedMs: number;
-  image: Blob;
+  /** Absent for a note from a microphone recording. */
+  image: Blob | null;
   audio: Blob | null;
   audioStartMs: number | null;
   audioEndMs: number | null;
@@ -237,7 +238,7 @@ export async function putNote(
   form.append("session_id", note.sessionId);
   form.append("seq", String(note.seq));
   form.append("captured_ms", String(Math.max(0, Math.round(note.capturedMs))));
-  form.append("image", note.image, "frame.png");
+  if (note.image) form.append("image", note.image, "frame.png");
   if (note.audio && note.audioStartMs !== null && note.audioEndMs !== null) {
     form.append("audio", note.audio, "note.wav");
     form.append(

@@ -113,6 +113,8 @@ export type StudyTarget = {
   offerSlides?: boolean;
   /** Questions may be researched on the web. */
   researchWeb?: boolean;
+  /** No tab is shared: notes come from the microphone, without a picture. */
+  audioOnly?: boolean;
 };
 
 type RecordingContextValue = {
@@ -610,7 +612,11 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         releaseCaptureRef.current?.();
         releaseCaptureRef.current = beginLiveCapture();
         setStorageFailureListener(() => setStorageDegraded(true));
-        const display = recorder.getDisplayStream();
+        // Notes come from the shared tab, or from the microphone when the
+        // recording has no shared tab (a meeting in one room).
+        const display = opts.study?.audioOnly
+          ? recorder.getMicStream()
+          : recorder.getDisplayStream();
         if (opts.study && display) {
           try {
             await studyController.begin(
@@ -624,6 +630,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
                 enrich: opts.study.enrich,
                 offerSlides: opts.study.offerSlides,
                 researchWeb: opts.study.researchWeb,
+                audioOnly: opts.study.audioOnly,
               },
               display,
             );

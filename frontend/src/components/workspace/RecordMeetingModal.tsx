@@ -96,20 +96,18 @@ export function RecordMeetingModal({
     [],
   );
   const [deviceId, setDeviceId] = useState("");
-  // Study notes: offered once tab sharing is chosen.
+  // Notes: from the shared tab when there is one, else from the microphone.
   const [studyOn, setStudyOn] = useState(false);
   const [studyChoice, setStudyChoice] =
     useState<StudyChoice>(EMPTY_STUDY_CHOICE);
   const [studyProblem, setStudyProblem] = useState(false);
   // After sharing starts: choose the video area before the dialog closes.
   const [cropping, setCropping] = useState(false);
-  const takeStudyNotes = canStudy && includeTab && studyOn;
-  const notebooks = useNotebooks(workspaceId, isOpen && canStudy && includeTab);
-  const features = useStudyFeatures(
-    workspaceId,
-    isOpen && canStudy && includeTab,
-  );
-  const studyBlocked = takeStudyNotes && sourceUrlProblem(studyChoice);
+  const takeStudyNotes = canStudy && studyOn;
+  const notebooks = useNotebooks(workspaceId, isOpen && canStudy);
+  const features = useStudyFeatures(workspaceId, isOpen && canStudy);
+  const studyBlocked =
+    takeStudyNotes && includeTab && sourceUrlProblem(studyChoice);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -154,7 +152,8 @@ export function RecordMeetingModal({
         try {
           const notebook = await resolveNotebook(
             workspaceId,
-            studyChoice,
+            // A link typed before tab sharing was switched off is not used.
+            includeTab ? studyChoice : { ...studyChoice, sourceUrl: "" },
             notebooks.data ?? [],
             recordingTitle,
           );
@@ -166,6 +165,7 @@ export function RecordMeetingModal({
             offerSlides: studyChoice.offerSlides,
             researchWeb:
               studyChoice.researchWeb && Boolean(features.data?.web_research),
+            audioOnly: !includeTab,
           };
         } catch {
           setStudyProblem(true);
@@ -192,7 +192,7 @@ export function RecordMeetingModal({
         setStudyChoice(EMPTY_STUDY_CHOICE);
         // Recording is live. With study notes, the shared tab is shown once
         // so the video area can be chosen; the dialog closes on Done.
-        if (study) setCropping(true);
+        if (study && includeTab) setCropping(true);
         else onClose();
       }
     } finally {
@@ -302,7 +302,7 @@ export function RecordMeetingModal({
                   {t("recordModal.includeTab")}
                 </FieldLabel>
               </Field>
-              {canStudy && includeTab && (
+              {canStudy && (
                 <Field>
                   <Field orientation="horizontal">
                     <Switch
@@ -316,7 +316,9 @@ export function RecordMeetingModal({
                     </FieldLabel>
                   </Field>
                   <FieldDescription id="take-study-notes-help">
-                    {t("study:setup.enableHelp")}
+                    {includeTab
+                      ? t("study:setup.enableHelp")
+                      : t("study:setup.enableHelpMic")}
                   </FieldDescription>
                 </Field>
               )}
@@ -327,9 +329,10 @@ export function RecordMeetingModal({
                   onChange={setStudyChoice}
                   notebooks={notebooks.data ?? []}
                   suggestedTitle={title.trim() || t("recordModal.title")}
+                  showSource={includeTab}
                 />
               )}
-              {takeStudyNotes && (
+              {takeStudyNotes && includeTab && (
                 <Field>
                   <Field orientation="horizontal">
                     <Switch

@@ -520,7 +520,7 @@ async def put_note(
     session_id: Annotated[uuid.UUID, Form()],
     seq: Annotated[int, Form(ge=0)],
     captured_ms: Annotated[int, Form(ge=0)],
-    image: Annotated[UploadFile, File()],
+    image: Annotated[UploadFile | None, File()] = None,
     audio: Annotated[UploadFile | None, File()] = None,
     audio_start_ms: Annotated[int | None, Form(ge=0)] = None,
     audio_end_ms: Annotated[int | None, Form(ge=0)] = None,
@@ -539,9 +539,14 @@ async def put_note(
             raise ConflictError("This note belongs to another session")
         return _note_public(existing)
 
-    image_bytes = await _read_limited(image, MAX_IMAGE_BYTES, "image")
-    if not image_bytes.startswith(_PNG_MAGIC):
-        raise AppError("The image must be a PNG file", status_code=422)
+    # A note from a microphone recording has no picture; it needs sound then.
+    image_bytes: bytes | None = None
+    if image is not None:
+        image_bytes = await _read_limited(image, MAX_IMAGE_BYTES, "image")
+        if not image_bytes.startswith(_PNG_MAGIC):
+            raise AppError("The image must be a PNG file", status_code=422)
+    elif audio is None:
+        raise AppError("A note needs an image or audio", status_code=422)
     audio_bytes: bytes | None = None
     if audio is not None:
         audio_bytes = await _read_limited(audio, MAX_AUDIO_BYTES, "audio")
@@ -553,11 +558,14 @@ async def put_note(
     store = get_audio_store()
     # Keys are derived from the note id: a repeated upload overwrites itself.
     base = f"{key_namespace()}workspaces/{workspace_id}/study/{note_id}"
-    image_key = f"{base}.png"
+    image_key = f"{base}.png" if image_bytes is not None else None
     audio_key = f"{base}.wav" if audio_bytes is not None else None
     notebook_id, study_session_id = notebook.id, study_session.id
     try:
-        await anyio.to_thread.run_sync(store.put, image_key, image_bytes, "image/png")
+        if image_bytes is not None:
+            await anyio.to_thread.run_sync(
+                store.put, image_key, image_bytes, "image/png"
+            )
         if audio_bytes is not None:
             await anyio.to_thread.run_sync(
                 store.put, audio_key, audio_bytes, "audio/wav"
@@ -578,7 +586,7 @@ async def put_note(
                 workspace_id=workspace_id,
             )
 
-    width, height = _png_size(image_bytes)
+    width, height = _png_size(image_bytes) if image_bytes else (None, None)
     note = StudyNote(
         id=note_id,
         notebook_id=notebook_id,

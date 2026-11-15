@@ -297,6 +297,9 @@ export function useMediaRecorder() {
   /** The shared tab's stream (its original video and audio tracks). */
   const getDisplayStream = useCallback(() => displayRef.current, []);
 
+  /** The microphone's own stream (notes in a recording without a shared tab). */
+  const getMicStream = useCallback(() => streamsRef.current[0] ?? null, []);
+
   /**
    * Share another tab mid-recording ("Change source"). The meeting recording
    * continues; the new tab's audio replaces the old one in the mix. Returns
@@ -402,6 +405,7 @@ export function useMediaRecorder() {
     trackWarning,
     isSupported,
     getDisplayStream,
+    getMicStream,
     replaceDisplay,
     getElapsedMs,
     isPaused,
