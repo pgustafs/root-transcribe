@@ -17,6 +17,7 @@ import enJobs from "@/locales/en/jobs.json";
 import enMeetings from "@/locales/en/meetings.json";
 import enNotes from "@/locales/en/notes.json";
 import enNotifications from "@/locales/en/notifications.json";
+import enStudy from "@/locales/en/study.json";
 import enUsers from "@/locales/en/users.json";
 import enValidation from "@/locales/en/validation.json";
 import svAccess from "@/locales/sv/access.json";
@@ -26,6 +27,7 @@ import svJobs from "@/locales/sv/jobs.json";
 import svMeetings from "@/locales/sv/meetings.json";
 import svNotes from "@/locales/sv/notes.json";
 import svNotifications from "@/locales/sv/notifications.json";
+import svStudy from "@/locales/sv/study.json";
 import svUsers from "@/locales/sv/users.json";
 import svValidation from "@/locales/sv/validation.json";
 
@@ -48,6 +50,7 @@ const NAMESPACES = [
   "notifications",
   "meetings",
   "notes",
+  "study",
   "validation",
 ] as const;
 
@@ -61,6 +64,7 @@ const resources = {
     notifications: enNotifications,
     meetings: enMeetings,
     notes: enNotes,
+    study: enStudy,
     validation: enValidation,
   },
   sv: {
@@ -72,6 +76,7 @@ const resources = {
     notifications: svNotifications,
     meetings: svMeetings,
     notes: svNotes,
+    study: svStudy,
     validation: svValidation,
   },
 } as const;

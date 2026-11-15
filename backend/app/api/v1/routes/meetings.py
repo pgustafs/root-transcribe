@@ -1145,6 +1145,12 @@ async def delete_recording(
             await audio_object_crud.request_delete(
                 session, clip_obj, reason="recording_delete", actor=user
             )
+    # Study notes taken in this recording go with it (media and entries).
+    from app.crud import study as study_crud
+
+    await study_crud.remove_for_recording(
+        session, recording_id=recording_id, workspace_id=workspace_id, actor=user
+    )
     await meeting_governance_crud.record_audit(
         session,
         action="recording.delete",

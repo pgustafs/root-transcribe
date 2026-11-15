@@ -17,6 +17,9 @@ const WorkspaceMeetingsPage = lazy(() =>
     default: m.WorkspaceMeetingsPage,
   })),
 );
+const StudyNotesPage = lazy(() =>
+  import("@/pages/StudyNotesPage").then((m) => ({ default: m.StudyNotesPage })),
+);
 const SpeakersPage = lazy(() =>
   import("@/pages/SpeakersPage").then((m) => ({ default: m.SpeakersPage })),
 );
@@ -50,6 +53,11 @@ export function AppRoutes() {
           <Route
             path="/workspaces/:id/meetings"
             element={<WorkspaceMeetingsPage />}
+          />
+          <Route path="/workspaces/:id/study" element={<StudyNotesPage />} />
+          <Route
+            path="/workspaces/:id/study/:notebookId"
+            element={<StudyNotesPage />}
           />
           <Route
             path="/admin/speakers"

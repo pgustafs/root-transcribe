@@ -47,7 +47,37 @@ export type StartOptions = {
    * recovery would preflight valid Ogg/MP4 against the WebM magic and refuse it.
    */
   onStart?: (mimeType: string) => void;
+  /**
+   * Keep this page in front after the tab is picked (study notes: the crop
+   * step is shown next). Chrome otherwise jumps to the shared tab.
+   */
+  keepFocus?: boolean;
 };
+
+type FocusController = { setFocusBehavior: (behavior: string) => void };
+declare const CaptureController: { new (): FocusController } | undefined;
+
+/** Ask for a tab/window with its audio. */
+async function requestDisplay(keepFocus: boolean): Promise<MediaStream> {
+  const options: DisplayMediaStreamOptions & { controller?: FocusController } =
+    {
+      video: true,
+      audio: true,
+    };
+  let controller: FocusController | null = null;
+  if (keepFocus && typeof CaptureController !== "undefined") {
+    controller = new CaptureController();
+    options.controller = controller;
+  }
+  const display = await navigator.mediaDevices.getDisplayMedia(options);
+  try {
+    // Only valid right after the picker closes, and only for a tab or window.
+    controller?.setFocusBehavior("focus-capturing-application");
+  } catch {
+    // A whole screen was shared, or the browser has no say: nothing to do.
+  }
+  return display;
+}
 
 /** Available microphones. Labels are empty until mic permission is granted —
  * callers show a generic name for those. */
@@ -100,7 +130,14 @@ export function useMediaRecorder() {
   const timerRef = useRef<number | null>(null);
   const meterRef = useRef<number | null>(null);
   const startedAtRef = useRef(0);
+  // Elapsed time at the moment of pausing; null while running.
+  const pausedAtRef = useRef<number | null>(null);
   const mimeRef = useRef("audio/webm");
+  // The shared tab's own stream and where its audio enters the mix. Study
+  // notes read the original tracks; "Change source" swaps them.
+  const displayRef = useRef<MediaStream | null>(null);
+  const tabSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const mixRef = useRef<MediaStreamAudioDestinationNode | null>(null);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -119,7 +156,30 @@ export function useMediaRecorder() {
     streamsRef.current = [];
     audioCtxRef.current?.close().catch(() => {});
     audioCtxRef.current = null;
+    displayRef.current = null;
+    tabSourceRef.current = null;
+    mixRef.current = null;
   }, []);
+
+  /** Wire a shared tab into the mix and watch its tracks. */
+  const attachDisplay = useCallback(
+    (display: MediaStream, ctx: AudioContext, dest: AudioNode) => {
+      displayRef.current = display;
+      const hasTabAudio = display.getAudioTracks().length > 0;
+      setTabAudioPresent(hasTabAudio);
+      tabSourceRef.current = null;
+      if (hasTabAudio) {
+        const source = ctx.createMediaStreamSource(display);
+        source.connect(dest);
+        tabSourceRef.current = source;
+      }
+      // Any of its tracks ending means the sharing stopped.
+      display.getTracks().forEach((track) => {
+        track.onended = () => setTrackWarning("tab-ended");
+      });
+    },
+    [],
+  );
 
   const start = useCallback(
     // Returns true when recording is live (callers branch on it immediately —
@@ -129,6 +189,7 @@ export function useMediaRecorder() {
       deviceId,
       onChunk,
       onStart,
+      keepFocus = false,
     }: StartOptions = {}): Promise<boolean> => {
       setError(null);
       setTrackWarning(null);
@@ -156,23 +217,14 @@ export function useMediaRecorder() {
 
         if (includeTabAudio) {
           // Capture another tab/window/screen and mix its audio with the mic.
-          const display = await navigator.mediaDevices.getDisplayMedia({
-            video: true,
-            audio: true,
-          });
+          const display = await requestDisplay(keepFocus);
           streamsRef.current.push(display);
           const ctx = new AudioContext();
           audioCtxRef.current = ctx;
           const dest = ctx.createMediaStreamDestination();
+          mixRef.current = dest;
           ctx.createMediaStreamSource(mic).connect(dest);
-          const hasTabAudio = display.getAudioTracks().length > 0;
-          setTabAudioPresent(hasTabAudio);
-          if (hasTabAudio) {
-            ctx.createMediaStreamSource(display).connect(dest);
-            display.getAudioTracks().forEach((track) => {
-              track.onended = () => setTrackWarning("tab-ended");
-            });
-          }
+          attachDisplay(display, ctx, dest);
           recordStream = dest.stream;
         }
 
@@ -222,6 +274,7 @@ export function useMediaRecorder() {
         onStart?.(mimeRef.current);
         recorderRef.current = recorder;
         startedAtRef.current = Date.now();
+        pausedAtRef.current = null;
         setDurationMs(0);
         setStatus("recording");
         timerRef.current = window.setInterval(
@@ -238,18 +291,65 @@ export function useMediaRecorder() {
         return false;
       }
     },
-    [cleanupStreams],
+    [cleanupStreams, attachDisplay],
   );
+
+  /** The shared tab's stream (its original video and audio tracks). */
+  const getDisplayStream = useCallback(() => displayRef.current, []);
+
+  /**
+   * Share another tab mid-recording ("Change source"). The meeting recording
+   * continues; the new tab's audio replaces the old one in the mix. Returns
+   * the new stream, or null when the picker was dismissed (nothing changes).
+   */
+  const replaceDisplay = useCallback(
+    async (keepFocus = false): Promise<MediaStream | null> => {
+      const ctx = audioCtxRef.current;
+      const dest = mixRef.current;
+      if (!ctx || !dest) return null;
+      let display: MediaStream;
+      try {
+        display = await requestDisplay(keepFocus);
+      } catch {
+        return null;
+      }
+      const previous = displayRef.current;
+      tabSourceRef.current?.disconnect();
+      if (previous) {
+        // stop() does not fire "ended": no false "sharing stopped" warning.
+        previous.getTracks().forEach((track) => {
+          track.onended = null;
+          track.stop();
+        });
+        streamsRef.current = streamsRef.current.filter((s) => s !== previous);
+      }
+      streamsRef.current.push(display);
+      setTrackWarning((current) => (current === "tab-ended" ? null : current));
+      attachDisplay(display, ctx, dest);
+      return display;
+    },
+    [attachDisplay],
+  );
+
+  /** Elapsed recording time right now, to the millisecond (the displayed
+   * `durationMs` only ticks four times a second). Frozen while paused. */
+  const getElapsedMs = useCallback((): number => {
+    if (!recorderRef.current) return 0;
+    return pausedAtRef.current ?? Date.now() - startedAtRef.current;
+  }, []);
+  const isPaused = useCallback(() => pausedAtRef.current !== null, []);
 
   const pause = useCallback(() => {
     recorderRef.current?.pause();
+    pausedAtRef.current = Date.now() - startedAtRef.current;
     stopTimer();
     setStatus("paused");
   }, [stopTimer]);
 
   const resume = useCallback(() => {
     recorderRef.current?.resume();
-    const elapsed = durationMs;
+    const elapsed = pausedAtRef.current ?? durationMs;
+    pausedAtRef.current = null;
     startedAtRef.current = Date.now() - elapsed;
     timerRef.current = window.setInterval(
       () => setDurationMs(Date.now() - startedAtRef.current),
@@ -301,6 +401,10 @@ export function useMediaRecorder() {
     tabAudioPresent,
     trackWarning,
     isSupported,
+    getDisplayStream,
+    replaceDisplay,
+    getElapsedMs,
+    isPaused,
     start,
     pause,
     resume,

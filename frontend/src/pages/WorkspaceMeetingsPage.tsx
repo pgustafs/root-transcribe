@@ -11,6 +11,7 @@ import {
   RotateCcwIcon,
   RotateCwIcon,
   UsersIcon,
+  BookOpenIcon,
   PencilIcon,
   SparklesIcon,
 } from "lucide-react";
@@ -270,7 +271,7 @@ export function WorkspaceMeetingsPage() {
   const isMobile = useIsMobile();
   const [libraryOpen, setLibraryOpen] = useState(false);
   const { id = "" } = useParams();
-  const { t, i18n } = useTranslation(["meetings", "common"]);
+  const { t, i18n } = useTranslation(["meetings", "common", "study"]);
   const workspace = useWorkspace(id);
   const perms = permissionsFor(workspace.data?.my_role);
   const canEdit = perms.canEditContent;
@@ -473,6 +474,16 @@ export function WorkspaceMeetingsPage() {
           onChange={(e) => onFilePicked(e.target.files?.[0] ?? null)}
         />
       </div>
+      {can("study_notes") && (
+        <div>
+          <Button asChild variant="ghost">
+            <RouterLink to={`/workspaces/${id}/study`}>
+              <BookOpenIcon data-icon="inline-start" />
+              {t("study:title")}
+            </RouterLink>
+          </Button>
+        </div>
+      )}
       {perms.canManageMembers && (
         <div>
           <Button onClick={() => setMembersOpen(true)} variant="ghost">
@@ -789,6 +800,7 @@ export function WorkspaceMeetingsPage() {
         <RecordMeetingModal
           workspaceId={id}
           isOpen={recordOpen}
+          canStudy={can("study_notes")}
           onClose={() => setRecordOpen(false)}
           onUploaded={(rid) => setOpenId(rid)}
         />

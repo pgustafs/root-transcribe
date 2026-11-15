@@ -72,6 +72,9 @@ AUDIO_DELETE_REASONS = (
     "redacted",
     "redaction_upload_failed",
     "render_failed",
+    # Study notes
+    "transcribed",
+    "notebook_deleted",
 )
 
 

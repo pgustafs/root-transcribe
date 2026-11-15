@@ -35,6 +35,7 @@ class MeetingCapability(enum.StrEnum):
     EXPORT = "export"
     CREATE_CLIP = "create_clip"
     CREATE_NOTES = "create_notes"
+    STUDY_NOTES = "study_notes"
     DELETE = "delete"
     REDACT = "redact"
     LEGAL_HOLD = "legal_hold"
@@ -52,6 +53,7 @@ _EDITOR = _VIEWER | {
     MeetingCapability.RELABEL_SPEAKERS,
     MeetingCapability.CREATE_CLIP,
     MeetingCapability.CREATE_NOTES,
+    MeetingCapability.STUDY_NOTES,
 }
 _MANAGER = _EDITOR | {
     MeetingCapability.APPROVE_TRANSCRIPT,

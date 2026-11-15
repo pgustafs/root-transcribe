@@ -8,7 +8,21 @@ import { useTranslation } from "react-i18next";
 
 import { Alert } from "@/components/Alert";
 import type { UploadProgress } from "@/lib/uploadManager";
-import { formatDuration as formatSeconds } from "@/utils/formatDuration";
+import { useShortcutHint } from "@/hooks/useStudy";
+import type { StudyStatus } from "@/lib/study/noteController";
+import {
+  formatDuration as formatSeconds,
+  formatMsClock,
+} from "@/utils/formatDuration";
+
+/** Study notes of the running recording, and what the dock can do with them. */
+export type StudyDockProps = {
+  status: StudyStatus;
+  onToggle: () => void;
+  onViewNotes: () => void;
+  onChangeSource: () => void;
+  onSetup: () => void;
+};
 
 export type RecorderDockStatus = "recording" | "paused" | "uploading" | "retry";
 
@@ -33,6 +47,8 @@ type Props = {
   /** Opens the destructive-cancel confirmation — never cancels directly. */
   onCancelRequest: () => void;
   busy: boolean;
+  /** Present while study notes are being taken from the shared tab. */
+  study?: StudyDockProps;
 };
 
 /** Status is a Label with TEXT, never color alone; the pulse dot is decorative
@@ -68,9 +84,17 @@ export function RecordingDock({
   onResume,
   onCancelRequest,
   busy,
+  study,
 }: Props) {
-  const { t } = useTranslation(["meetings", "common"]);
+  const { t } = useTranslation(["meetings", "common", "study"]);
   const presentation = STATUS_PRESENTATION[status];
+  const shortcutHint = useShortcutHint();
+  const notes = study?.status;
+  const noteOpen = notes ? notes.openSinceMs !== null : false;
+  // New captures need a live shared tab and a running recording; an open
+  // note can always be stopped.
+  const canCapture =
+    Boolean(notes?.videoAvailable) && status === "recording" && !busy;
 
   return (
     <div className="flex flex-col gap-4">
@@ -113,7 +137,9 @@ export function RecordingDock({
                       onClick={onStop}
                       disabled={busy}
                       aria-busy={busy}
-                      variant="default"
+                      // One turquoise action per surface: while notes are
+                      // taken, that is Take note.
+                      variant={study ? "outline" : "default"}
                       size="sm"
                     >
                       {busy && (
@@ -156,6 +182,58 @@ export function RecordingDock({
           </div>
         </div>
       </div>
+      {study && notes && (
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-2"
+          data-testid="study-dock"
+        >
+          <Button
+            onClick={study.onToggle}
+            disabled={!noteOpen && !canCapture}
+            variant="default"
+            size="sm"
+            aria-describedby="study-dock-state"
+          >
+            {noteOpen ? t("study:dock.stopNote") : t("study:dock.takeNote")}
+          </Button>
+          {shortcutHint && (
+            <kbd className="rounded-md border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+              {shortcutHint}
+            </kbd>
+          )}
+          {/* Not a live region: the timer ticks every second. Start and save
+              are announced once in the region below. */}
+          <span id="study-dock-state" className="text-sm text-muted-foreground">
+            {noteOpen
+              ? t("study:dock.capturing", {
+                  time: formatMsClock(
+                    Math.max(0, durationMs - (notes.openSinceMs ?? 0)),
+                  ),
+                })
+              : status === "paused"
+                ? t("study:dock.pausedHint")
+                : notes.notebookTitle}
+          </span>
+          <Button onClick={study.onViewNotes} variant="outline" size="sm">
+            {notes.count > 0
+              ? t("study:dock.viewNotes", { count: notes.count })
+              : t("study:dock.viewNotesNone")}
+          </Button>
+          <Button onClick={study.onChangeSource} variant="ghost" size="sm">
+            {t("study:dock.changeSource")}
+          </Button>
+          <Button onClick={study.onSetup} variant="ghost" size="sm">
+            {t("study:dock.setupShortcut")}
+          </Button>
+          <span className="sr-only" aria-live="polite">
+            {noteOpen
+              ? t("study:dock.started")
+              : notes.savedTick > 0
+                ? `${t("study:dock.saved")} ${t("study:dock.viewNotes", { count: notes.count })}`
+                : ""}
+          </span>
+        </div>
+      )}
       {showLevel && (
         <div>
           <Progress
@@ -198,6 +276,48 @@ export function RecordingDock({
                   variant="warning"
                   isInline={true}
                   title={t("recordingBar.noTabAudio")}
+                />
+              </div>
+            )}
+            {notes && !notes.audioAvailable && notes.videoAvailable && (
+              <div>
+                <Alert
+                  variant="warning"
+                  isInline={true}
+                  title={t("study:dock.screenshotOnly")}
+                >
+                  {t("study:dock.screenshotOnlyHelp")}
+                </Alert>
+              </div>
+            )}
+            {notes && !notes.videoAvailable && (
+              <div>
+                <Alert
+                  variant="warning"
+                  isInline={true}
+                  title={t("study:dock.videoLost")}
+                />
+              </div>
+            )}
+            {notes?.notice &&
+              notes.notice !== "sharing_lost" &&
+              notes.notice !== "paused" && (
+                <div>
+                  <Alert
+                    variant="info"
+                    isInline={true}
+                    title={t(`study:dock.notice.${notes.notice}`, {
+                      defaultValue: notes.notice,
+                    })}
+                  />
+                </div>
+              )}
+            {notes?.notice === "paused" && (
+              <div>
+                <Alert
+                  variant="info"
+                  isInline={true}
+                  title={t("study:dock.notice.paused")}
                 />
               </div>
             )}

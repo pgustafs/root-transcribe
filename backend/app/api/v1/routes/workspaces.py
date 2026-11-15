@@ -212,6 +212,16 @@ async def delete_workspace(
             await audio_object_crud.request_delete(
                 session, obj, reason="workspace_delete", actor=user
             )
+    if settings.AUDIO_S3_ENDPOINT_URL:
+        from app.crud import study as study_crud
+
+        await study_crud.tombstone_media(
+            session,
+            await study_crud.notes_for_workspace(session, workspace.id),
+            workspace_id=workspace.id,
+            reason="workspace_delete",
+            actor=user,
+        )
     await workspace_crud.delete_workspace(session, workspace=workspace)
 
 

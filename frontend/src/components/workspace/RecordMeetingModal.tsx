@@ -31,6 +31,16 @@ import { Alert } from "@/components/Alert";
 import { useRecordingContext } from "@/components/recording/RecordingProvider";
 import { useConfig } from "@/hooks/useConfig";
 import { listAudioInputs } from "@/hooks/useMediaRecorder";
+import { StudyCropStep } from "@/components/study/StudyCropStep";
+import { StudySourceFields } from "@/components/study/StudySourceFields";
+import {
+  EMPTY_STUDY_CHOICE,
+  resolveNotebook,
+  sourceUrlProblem,
+  type StudyChoice,
+} from "@/lib/study/studyChoice";
+import { Switch } from "@/components/ui/switch";
+import { useNotebooks } from "@/hooks/useStudy";
 
 /** How long the readiness probe may take before we stop waiting on it. The
  * probe is an optimisation — the upload path is still gated server-side and
@@ -60,6 +70,8 @@ type Props = {
   onClose: () => void;
   /** Called with the recording id after the recording is stopped + uploaded. */
   onUploaded?: (recordingId: string) => void;
+  /** The caller may take study notes here (server-computed capability). */
+  canStudy?: boolean;
 };
 
 export function RecordMeetingModal({
@@ -67,8 +79,9 @@ export function RecordMeetingModal({
   isOpen,
   onClose,
   onUploaded,
+  canStudy = false,
 }: Props) {
-  const { t } = useTranslation(["meetings", "common"]);
+  const { t } = useTranslation(["meetings", "common", "study"]);
   const recording = useRecordingContext();
   const config = useConfig();
 
@@ -83,6 +96,16 @@ export function RecordMeetingModal({
     [],
   );
   const [deviceId, setDeviceId] = useState("");
+  // Study notes: offered once tab sharing is chosen.
+  const [studyOn, setStudyOn] = useState(false);
+  const [studyChoice, setStudyChoice] =
+    useState<StudyChoice>(EMPTY_STUDY_CHOICE);
+  const [studyProblem, setStudyProblem] = useState(false);
+  // After sharing starts: choose the video area before the dialog closes.
+  const [cropping, setCropping] = useState(false);
+  const takeStudyNotes = canStudy && includeTab && studyOn;
+  const notebooks = useNotebooks(workspaceId, isOpen && canStudy && includeTab);
+  const studyBlocked = takeStudyNotes && sourceUrlProblem(studyChoice);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -99,9 +122,11 @@ export function RecordMeetingModal({
   const labelId = "record-meeting-title";
 
   const handleStart = async () => {
-    if (starting || consentBlocked || !recording.isSupported) return;
+    if (starting || consentBlocked || studyBlocked || !recording.isSupported)
+      return;
     setStarting(true);
     setServiceDown(false);
+    setStudyProblem(false);
     try {
       // Readiness preflight (issue #37, after #36): don't START a recording the
       // deployment cannot transcribe — the user would only find out at upload.
@@ -119,9 +144,30 @@ export function RecordMeetingModal({
         setServiceDown(true);
         return;
       }
+      const recordingTitle = title.trim() || t("recordModal.title");
+      let study;
+      if (takeStudyNotes) {
+        try {
+          const notebook = await resolveNotebook(
+            workspaceId,
+            studyChoice,
+            notebooks.data ?? [],
+            recordingTitle,
+          );
+          study = {
+            notebookId: notebook.id,
+            notebookTitle: notebook.title,
+            mode: studyChoice.mode,
+          };
+        } catch {
+          setStudyProblem(true);
+          return;
+        }
+      }
       const ok = await recording.start({
         workspaceId,
-        title: title.trim() || t("recordModal.title"),
+        study,
+        title: recordingTitle,
         includeTabAudio: includeTab,
         consent,
         requestedLanguage,
@@ -134,7 +180,12 @@ export function RecordMeetingModal({
         setTitle("");
         setIncludeTab(false);
         setConsent(false);
-        onClose();
+        setStudyOn(false);
+        setStudyChoice(EMPTY_STUDY_CHOICE);
+        // Recording is live. With study notes, the shared tab is shown once
+        // so the video area can be chosen; the dialog closes on Done.
+        if (study) setCropping(true);
+        else onClose();
       }
     } finally {
       // ALWAYS clears: a spinner that outlives its work tells the user nothing
@@ -156,9 +207,18 @@ export function RecordMeetingModal({
         className="max-h-[90dvh] overflow-y-auto sm:max-w-lg"
       >
         <DialogHeader>
-          <DialogTitle id={labelId}>{t("recordModal.title")}</DialogTitle>
+          <DialogTitle id={labelId}>
+            {cropping ? t("study:crop.title") : t("recordModal.title")}
+          </DialogTitle>
         </DialogHeader>
-        <div className="min-w-0">
+        {cropping && (
+          <StudyCropStep
+            getPreview={recording.studyPreview}
+            initial={recording.studyCrop()}
+            onChange={(crop) => void recording.setStudyCrop(crop)}
+          />
+        )}
+        <div className={cropping ? "hidden" : "min-w-0"}>
           <form
             id="record-meeting-form"
             onSubmit={(event) => {
@@ -234,6 +294,41 @@ export function RecordMeetingModal({
                   {t("recordModal.includeTab")}
                 </FieldLabel>
               </Field>
+              {canStudy && includeTab && (
+                <Field>
+                  <Field orientation="horizontal">
+                    <Switch
+                      id="take-study-notes"
+                      checked={studyOn}
+                      onCheckedChange={setStudyOn}
+                      aria-describedby="take-study-notes-help"
+                    />
+                    <FieldLabel htmlFor="take-study-notes">
+                      {t("study:setup.enable")}
+                    </FieldLabel>
+                  </Field>
+                  <FieldDescription id="take-study-notes-help">
+                    {t("study:setup.enableHelp")}
+                  </FieldDescription>
+                </Field>
+              )}
+              {takeStudyNotes && (
+                <StudySourceFields
+                  idPrefix="study"
+                  choice={studyChoice}
+                  onChange={setStudyChoice}
+                  notebooks={notebooks.data ?? []}
+                  suggestedTitle={title.trim() || t("recordModal.title")}
+                />
+              )}
+              {studyProblem && (
+                <Alert
+                  variant="danger"
+                  isInline={true}
+                  isLiveRegion={true}
+                  title={t("study:setup.notebookFailed")}
+                />
+              )}
               <Field>
                 <Field orientation="horizontal">
                   <Checkbox
@@ -292,21 +387,34 @@ export function RecordMeetingModal({
           </form>
         </div>
         <DialogFooter>
-          <Button
-            type="submit"
-            form="record-meeting-form"
-            disabled={!recording.isSupported || starting || consentBlocked}
-            aria-busy={starting}
-            variant="default"
-          >
-            {starting && (
-              <Spinner data-icon="inline-start" aria-label={undefined} />
-            )}
-            {t("recordModal.start")}
-          </Button>
-          <Button onClick={onClose} variant="link">
-            {t("common:actions.cancel")}
-          </Button>
+          {cropping ? (
+            <Button onClick={onClose} variant="default">
+              {t("study:crop.done")}
+            </Button>
+          ) : (
+            <>
+              <Button
+                type="submit"
+                form="record-meeting-form"
+                disabled={
+                  !recording.isSupported ||
+                  starting ||
+                  consentBlocked ||
+                  studyBlocked
+                }
+                aria-busy={starting}
+                variant="default"
+              >
+                {starting && (
+                  <Spinner data-icon="inline-start" aria-label={undefined} />
+                )}
+                {t("recordModal.start")}
+              </Button>
+              <Button onClick={onClose} variant="link">
+                {t("common:actions.cancel")}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

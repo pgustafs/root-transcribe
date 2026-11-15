@@ -745,6 +745,79 @@ Things to know:
 - Quality depends on the model. The feature has been tested end to end with a
   stand-in model only; try it with yours before relying on it.
 
+## Study notes with a Mac keyboard shortcut
+
+While you record a browser tab (a lecture, a course video), **Take note** saves
+the frame that is showing together with the speech around it. All notes for one
+video collect in one notebook, which exports as Markdown with its images.
+Chrome or Edge on a desktop is needed (tab audio, frame capture).
+
+1. In a workspace choose **Record audio**, tick *Also capture another tab*,
+   and turn on **Take study notes**. Paste the video's link (a YouTube link in
+   any form always opens the same notebook), or pick an existing notebook, or
+   name a new one. The full recording is saved as before.
+2. Pick the tab in the browser's share dialog, with *Also share tab audio* on.
+   The app then shows the shared tab once: keep the whole frame, or select the
+   video area to leave out comments and recommendations. A video in fullscreen
+   needs no cropping.
+3. Press **Take note** in the recording bar, or your Mac shortcut.
+   - *Until stopped* (default): the first press saves the frame and up to 15
+     seconds of tab audio before it; the next press ends the note. Playback
+     and the recording continue.
+   - *Last 15 seconds only*: every press is one complete note.
+   Only the tab's own audio is used for notes, never the microphone.
+4. **View notes** opens the notebook. Each entry shows its image at once and
+   says what state its text is in (Transcribing…, Ready, No speech detected,
+   Transcription failed · Retry, Screenshot only). **Export Markdown** downloads
+   a ZIP with one `.md` file and an `images/` folder.
+
+Good to know: pausing the recording ends an open note, and nothing from before
+the pause reaches a later note. If the tab moves on to another video, use
+**Change source** so the next notes go to the right notebook. Cancelling the
+recording discards the notes taken in it; deleting a recording later removes
+its notes too. A note is at most 10 minutes long. Times are "in this
+recording" (the recorder's clock); a link to the exact moment in the video is
+only added when you paste the player's *Copy video URL at current time* link
+on an entry.
+
+### Set up the Mac shortcut (once)
+
+Open **Set up Mac shortcut** in the recording bar. It shows the address for
+your installation and creates your shortcut key. The key is shown once, only
+its hash is stored, and all it can do is start or stop a note in your own
+running recording. *Create a new key* replaces it; *Revoke key* removes it.
+
+In the Shortcuts app create a shortcut "Take note" with these actions:
+
+1. **Current Date**, then **Format Date** with the custom format
+   `yyyyMMddHHmmssSSS`. This marks the press, so a repeated request never
+   takes a second note.
+2. **Get Contents of URL**
+   - URL: `<your app address>/api/v1/study/hotkey` (shown in the dialog)
+   - Method: `POST`
+   - Header `Authorization`: `Bearer rtk_…` (your key)
+   - Header `X-Invocation-Id`: the *Formatted Date* from step 1
+3. **Show Notification** with *Contents of URL*. It reads for example
+   `Note started · 08:42`, `Note saved · 08:27–09:03`, or says why nothing was
+   taken (no recording running, recording paused, tab no longer shared).
+
+In the shortcut's details (ⓘ) choose **Add Keyboard Shortcut** and press a free
+combination, for example Control–Option–N. To test without taking a note, post
+the same way to `…/api/v1/study/hotkey/test`: it answers
+`Connected as <you>. Recorder: ready.` or `not running`.
+
+If Shortcuts refuses a plain `http://localhost` address, use the action **Run
+Shell Script** instead:
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer rtk_…" \
+  -H "X-Invocation-Id: $(date +%s%N)" "http://localhost:8095/api/v1/study/hotkey"
+```
+
+The answer comes when the note is safely stored in the browser, which for a
+large frame can take a second or two; the frame and audio themselves are taken
+at the press. The dialog shows the measured time from key press to frame.
+
 ## Measure transcription quality
 
 `eval/ami_eval.py` scores a running installation against a meeting from the

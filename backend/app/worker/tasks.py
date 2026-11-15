@@ -1827,6 +1827,10 @@ def build_compliance_export(job_id: str) -> dict[str, str]:
             raise
 
 
+#: How long the audio of a study note that failed transcription is kept.
+STUDY_AUDIO_KEEP_DAYS = 7
+
+
 @celery_app.task(name="tasks.cleanup_old_audio")
 def cleanup_old_audio() -> dict[str, int]:
     """Retention sweep: request durable deletion of aged meeting audio + purge
@@ -1889,6 +1893,20 @@ def cleanup_old_audio() -> dict[str, int]:
             )
             audio_object_crud.request_delete_sync(session, obj, reason="retention")
             delete_requested += 1
+        # Study-note excerpts are deleted when transcribed; one that failed and
+        # was never retried must not stay forever.
+        from app.models.study import StudyNote
+
+        stale = now - timedelta(days=STUDY_AUDIO_KEEP_DAYS)
+        for key in session.execute(
+            select(StudyNote.audio_key).where(
+                StudyNote.audio_key.is_not(None), StudyNote.updated_at < stale
+            )
+        ).scalars():
+            obj = audio_object_crud.get_by_key_sync(session, key)
+            if obj is not None and obj.status == "active":
+                audio_object_crud.request_delete_sync(session, obj, reason="retention")
+                delete_requested += 1
         session.commit()
 
     # Erase voiceprints past their profile's retention; tombstone their samples.
@@ -2049,6 +2067,15 @@ def _finalize_confirmed_deletion(session, obj) -> None:
         )
         if vp is not None:
             vp.sample_key = None
+    elif obj.kind in ("study_image", "study_audio") and obj.ref_id is not None:
+        from app.models.study import StudyNote
+
+        note = session.get(StudyNote, obj.ref_id)
+        if note is not None:
+            if obj.kind == "study_audio" and note.audio_key == obj.key:
+                note.audio_key = None
+            elif obj.kind == "study_image" and note.image_key == obj.key:
+                note.image_key = None
 
 
 #: How long the EXPIRY sweep waits for one session's admitted writes before
@@ -2797,5 +2824,52 @@ def identify_speaker_names(run_id: str) -> dict[str, str]:
             logger.exception("identify_speaker_names: run %s failed", run_id)
             speaker_name_run_crud.fail_sync(
                 session, run_id=rid, error=f"{type(exc).__name__}: {exc}"
+            )
+            raise
+
+
+@celery_app.task(
+    name="tasks.transcribe_study_note", soft_time_limit=900, time_limit=960
+)
+def transcribe_study_note(note_id: str) -> dict[str, str]:
+    """Transcribe the short tab-audio excerpt of one study note.
+
+    Independent of the meeting pipeline (no diarization, default queue), so a
+    learner can keep taking notes while the full recording is still running.
+    The excerpt is temporary: once transcribed, its audio is deleted. A failed
+    note keeps its audio so it can be tried again.
+    """
+    from app.crud import study as study_crud
+    from app.models.study import StudyNote, StudySession
+    from app.services.audio_store import get_audio_store
+    from app.services.transcription import get_transcription_service
+
+    nid = uuid.UUID(note_id)
+    with session_scope() as session:
+        if not study_crud.claim_processing_sync(session, note_id=nid):
+            return {"status": "skipped", "reason": "not_pending"}
+        try:
+            note = session.get(StudyNote, nid)
+            study_session = session.get(StudySession, note.session_id)
+            language = study_session.language if study_session else "auto"
+            audio = get_audio_store().get_sync(note.audio_key)
+            result = get_transcription_service().transcribe_sync(
+                audio, "note.wav", language=None if language == "auto" else language
+            )
+            study_crud.complete_sync(
+                session, note_id=nid, text=(result.text or "").strip()
+            )
+            obj = audio_object_crud.get_by_key_sync(session, note.audio_key)
+            if obj is not None:
+                audio_object_crud.request_delete_sync(
+                    session, obj, reason="transcribed"
+                )
+                session.commit()
+            return {"status": note.status}
+        except Exception as exc:
+            logger.exception("transcribe_study_note: note %s failed", note_id)
+            session.rollback()
+            study_crud.fail_sync(
+                session, note_id=nid, error=f"{type(exc).__name__}: {exc}"
             )
             raise

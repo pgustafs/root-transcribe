@@ -17,3 +17,14 @@ export function formatMsClock(ms: number): string {
     total % 60,
   ).padStart(2, "0")}`;
 }
+
+/** 08:42, or 1:08:42 past the hour (as in the exported document). */
+export function noteClock(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 3600) return formatMsClock(ms);
+  const hours = Math.floor(seconds / 3600);
+  const rest = seconds % 3600;
+  return `${hours}:${String(Math.floor(rest / 60)).padStart(2, "0")}:${String(
+    rest % 60,
+  ).padStart(2, "0")}`;
+}

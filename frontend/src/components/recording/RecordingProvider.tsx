@@ -34,6 +34,19 @@ import { Alert } from "@/components/Alert";
 import { RecordingDock } from "@/components/recording/RecordingDock";
 import { meetingKeys } from "@/hooks/useMeetings";
 import { useMediaRecorder } from "@/hooks/useMediaRecorder";
+import { useNavigate } from "react-router-dom";
+import { ChangeSourceDialog } from "@/components/study/ChangeSourceDialog";
+import { MacShortcutSetup } from "@/components/study/MacShortcutSetup";
+import type { Crop } from "@/lib/study/frame";
+import {
+  discardStudySessions,
+  IDLE_STUDY,
+  linkStudySessions,
+  recoverStudyNotes,
+  StudyNoteController,
+  type StudyStatus,
+} from "@/lib/study/noteController";
+import type { StudyMode } from "@/lib/study/noteStore";
 import {
   appendChunk,
   assembleRecording,
@@ -80,6 +93,14 @@ export type StartRecordingOptions = {
   deviceId?: string;
   /** Called with the created recording id once the upload is accepted. */
   onUploaded?: (recordingId: string) => void;
+  /** Take study notes from the shared tab into this notebook. */
+  study?: StudyTarget;
+};
+
+export type StudyTarget = {
+  notebookId: string;
+  notebookTitle: string;
+  mode: StudyMode;
 };
 
 type RecordingContextValue = {
@@ -93,6 +114,12 @@ type RecordingContextValue = {
   /** A localized reason the start could not even begin (storage locked by
    * another tab, etc.) — NOT a microphone failure. */
   startError: string | null;
+  /** Study notes of the running recording (inactive when none are taken). */
+  study: StudyStatus;
+  /** A still of the whole shared frame, for choosing the video area. */
+  studyPreview: () => Promise<Blob>;
+  studyCrop: () => Crop;
+  setStudyCrop: (crop: Crop) => Promise<void>;
 };
 
 const RecordingContext = createContext<RecordingContextValue | null>(null);
@@ -168,8 +195,31 @@ const extFromMime = (mimeType: string): string =>
   mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") ? "mp4" : "webm";
 
 export function RecordingProvider({ children }: { children: ReactNode }) {
-  const { t } = useTranslation(["meetings", "common"]);
+  const { t } = useTranslation(["meetings", "common", "study"]);
   const recorder = useMediaRecorder();
+  const navigate = useNavigate();
+  // Study notes: one controller for the dock button and the Mac shortcut.
+  const [study, setStudy] = useState<StudyStatus>(IDLE_STUDY);
+  const recorderRef = useRef(recorder);
+  recorderRef.current = recorder;
+  const studyRef = useRef<StudyNoteController | null>(null);
+  if (studyRef.current === null) {
+    studyRef.current = new StudyNoteController({
+      clock: () => recorderRef.current.getElapsedMs(),
+      isPaused: () => recorderRef.current.isPaused(),
+      onChange: setStudy,
+    });
+  }
+  const studyController = studyRef.current;
+  const [shortcutSetupOpen, setShortcutSetupOpen] = useState(false);
+  const [changingSource, setChangingSource] = useState(false);
+  useEffect(() => {
+    // Notes left behind by a reload or a crash are finished and sent.
+    void recoverStudyNotes();
+    return () => {
+      void studyController.end("interrupted");
+    };
+  }, [studyController]);
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<StartRecordingOptions | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -480,6 +530,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       const ok = await recorder.start({
         includeTabAudio: opts.includeTabAudio,
         deviceId: opts.deviceId,
+        // Stay on this page after the tab is picked: the crop step is next.
+        keepFocus: Boolean(opts.study),
         // Persist the REAL container immediately, so a crash before Stop still
         // recovers Ogg/MP4 correctly instead of being preflighted as WebM.
         onStart: (mimeType) => {
@@ -513,6 +565,24 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         releaseCaptureRef.current?.();
         releaseCaptureRef.current = beginLiveCapture();
         setStorageFailureListener(() => setStorageDegraded(true));
+        const display = recorder.getDisplayStream();
+        if (opts.study && display) {
+          try {
+            await studyController.begin(
+              {
+                workspaceId: opts.workspaceId,
+                notebookId: opts.study.notebookId,
+                notebookTitle: opts.study.notebookTitle,
+                language: opts.requestedLanguage ?? "auto",
+                mode: opts.study.mode,
+                localRecordingId: localId,
+              },
+              display,
+            );
+          } catch {
+            // The recording itself is running; notes are simply unavailable.
+          }
+        }
       } else {
         await deleteStoredSession(localId).catch(() => {
           // Nothing was captured yet; a failed cleanup is not worth surfacing.
@@ -520,7 +590,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       }
       return ok;
     },
-    [recorder, t],
+    [recorder, t, studyController],
   );
 
   /** The right advice for a storage failure: an out-of-date tab can only be
@@ -650,6 +720,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         queryClient.invalidateQueries({
           queryKey: meetingKeys.list(args.workspaceId),
         });
+        // The recording exists now: its study notes are tied to it.
+        void linkStudySessions(args.localId, rec.id);
         args.onUploaded?.(rec.id);
         return true;
       } catch (e) {
@@ -721,6 +793,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
             : "unknown";
         const alreadyCompleted = probe === "completed";
         if (alreadyCompleted && recordingId) {
+          void linkStudySessions(args.localId, recordingId);
           await updateStoredSession(args.localId, {
             state: "awaiting-validation",
             recordingId,
@@ -780,6 +853,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
 
   const stopAndUpload = useCallback(async () => {
     if (!target || !localIdRef.current) return;
+    // An open study note ends at the last sample, before the tracks stop.
+    await studyController.end("stopped");
     // The lease is held through stop, the write drain, AND the authoritative
     // state write below: `recorder.stop()` flushes a final `dataavailable`,
     // and releasing before it is durable lets another tab's upgrade close the
@@ -843,6 +918,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     blockUpload,
     releaseCapture,
     storageMessage,
+    studyController,
   ]);
 
   const retryUpload = useCallback(async () => {
@@ -903,6 +979,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     async (localId: string): Promise<boolean> => {
       try {
         await deleteStoredSession(localId);
+        // The recording is discarded: the notes taken in it go with it.
+        void discardStudySessions(localId);
         return true;
       } catch (error) {
         setUploadError(storageMessage(error));
@@ -933,6 +1011,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     }
     const wasUploading = abortRef.current !== null;
     abortRef.current?.abort();
+    await studyController.end("stopped");
     recorder.cancel();
     releaseCapture();
     localIdRef.current = null;
@@ -972,7 +1051,40 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
     setPendingLocalId(null);
     setTarget(null);
     setUploadError(null);
-  }, [recorder, target, pendingLocalId, t, discardLocal]);
+  }, [recorder, target, pendingLocalId, t, discardLocal, studyController]);
+
+  const pauseRecording = useCallback(() => {
+    recorder.pause();
+    void studyController.pause();
+  }, [recorder, studyController]);
+  const resumeRecording = useCallback(() => {
+    recorder.resume();
+    void studyController.resume();
+  }, [recorder, studyController]);
+
+  /** "Change source": share another tab and bind the next notes to its
+   * notebook. The meeting recording keeps running. */
+  const changeStudySource = useCallback(
+    async (next: StudyTarget): Promise<boolean> => {
+      const localId = localIdRef.current;
+      if (!target || !localId) return false;
+      const display = await recorder.replaceDisplay(true);
+      if (!display) return false;
+      await studyController.begin(
+        {
+          workspaceId: target.workspaceId,
+          notebookId: next.notebookId,
+          notebookTitle: next.notebookTitle,
+          language: target.requestedLanguage ?? "auto",
+          mode: next.mode,
+          localRecordingId: localId,
+        },
+        display,
+      );
+      return true;
+    },
+    [recorder, studyController, target],
+  );
 
   const resumeRecovered = useCallback(
     async (stored: StoredRecordingSession) => {
@@ -1116,8 +1228,14 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
        * database is locked by another tab). Distinct from `error`, which is
        * always a capture/microphone problem. */
       startError,
+      study,
+      studyPreview: () => studyController.previewFrame(),
+      studyCrop: () => studyController.crop,
+      setStudyCrop: (crop: Crop) => studyController.setCrop(crop),
     }),
     [
+      study,
+      studyController,
       active,
       target?.workspaceId,
       recorder.isSupported,
@@ -1271,8 +1389,22 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
                         storageDegraded={storageDegraded}
                         onStop={() => void stopAndUpload()}
                         onRetry={() => void retryUpload()}
-                        onPause={recorder.pause}
-                        onResume={recorder.resume}
+                        onPause={pauseRecording}
+                        onResume={resumeRecording}
+                        study={
+                          study.active && active
+                            ? {
+                                status: study,
+                                onToggle: () => void studyController.toggle(),
+                                onViewNotes: () =>
+                                  navigate(
+                                    `/workspaces/${study.workspaceId}/study/${study.notebookId}`,
+                                  ),
+                                onChangeSource: () => setChangingSource(true),
+                                onSetup: () => setShortcutSetupOpen(true),
+                              }
+                            : undefined
+                        }
                         onCancelRequest={() => setConfirmingCancel(true)}
                         busy={uploading}
                       />
@@ -1302,6 +1434,9 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
           </DialogHeader>
           <div id="recording-cancel-confirm-body" className="min-w-0">
             {t("recordingBar.cancelConfirmBody")}
+            {study.count > 0 && (
+              <> {t("study:dock.cancelAlsoNotes", { count: study.count })}</>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -1319,6 +1454,21 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {shortcutSetupOpen && (
+        <MacShortcutSetup
+          isOpen={shortcutSetupOpen}
+          onClose={() => setShortcutSetupOpen(false)}
+          lastDelayMs={study.lastDelayMs}
+        />
+      )}
+      {changingSource && target && (
+        <ChangeSourceDialog
+          workspaceId={target.workspaceId}
+          mode={study.mode}
+          onClose={() => setChangingSource(false)}
+          onChange={changeStudySource}
+        />
+      )}
     </RecordingContext.Provider>
   );
 }

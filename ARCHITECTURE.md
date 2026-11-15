@@ -112,6 +112,49 @@ Source: [runner](agent-runner/main.py), [runner image](deploy/agent.Containerfil
 [export](backend/app/services/note_export.py),
 [models](backend/app/models/meeting_note.py).
 
+### Study notes
+
+A learner records a tab and takes notes: a PNG of the visible frame plus the
+transcript of a short piece of the tab's audio.
+
+- **Capture (browser).** The recorder keeps the shared tab's original tracks.
+  An AudioWorklet (`frontend/public/study-tap.worklet.js`) on the tab's audio
+  track alone (the microphone is never connected to it) feeds a 15-second,
+  sample-counted buffer at 16 kHz mono (`lib/study/tabAudio.ts`). A press pins
+  the newest video frame (`ImageCapture.grabFrame`) and the look-back at the
+  same moment; PNG encoding and storing happen afterwards. An open note appends
+  later blocks to IndexedDB in 5-second chunks and is joined by sample
+  position. Pause, resume and "Change source" start a new interval.
+- **State.** `lib/study/noteController.ts` is one state machine for the dock
+  button and the shortcut. Presses are handled one at a time; each shortcut
+  press has an id, and what it did is stored (IndexedDB, and for 10 minutes on
+  the server) so a repeat returns the first answer.
+- **Local store.** IndexedDB database `study-notes` (separate from the
+  recorder's). Notes are written there first and uploaded with a
+  browser-made id (`PUT …/study/notes/{id}`), so retries and reloads never
+  duplicate. A note left open by a crash is completed from its stored samples.
+- **Server.** Tables `study_notebook` (owner + workspace + source, one per
+  video), `study_session`, `study_note`, `hotkey_credential`. Images and
+  excerpts are objects in the audio store with `audio_object` rows
+  (`study_image`, `study_audio`). `tasks.transcribe_study_note` (default
+  queue, no diarization) transcribes the excerpt with the recording's language
+  and then requests deletion of the excerpt; a failed note keeps it for Retry
+  (swept after 7 days). Deleting the recording, the notebook or the workspace
+  tombstones the media.
+- **Access.** Capability `study_notes` (editor and above). Notebooks are
+  private to their owner; every route checks owner and workspace. Exporting a
+  notebook that contains entries from a *restricted* recording needs the
+  explicit per-user grant.
+- **Shortcut delivery.** The recording browser holds a server-sent-events
+  stream (`GET /study/commands/stream`, normal sign-in). `POST /study/hotkey`
+  (shortcut key in the `Authorization` header) publishes the press on Redis
+  channel `study:cmd:{user}`; the API process holding the stream forwards it,
+  the browser acts and acknowledges, and the waiting request answers in plain
+  text. No recorder, two recorders, a paused recording, a lost tab and a press
+  older than 2 seconds each get their own answer. nginx serves the stream from
+  a dedicated unbuffered location. The shortcut key is accepted by the two
+  hotkey routes only.
+
 ## Recording and transcription flow
 
 Browser capture uses `MediaRecorder`. Chunks and session metadata are persisted
@@ -341,7 +384,7 @@ Browser IndexedDB contains local recovery copies, independently of server storag
 
 Alembic migrations are explicit and ordered. `0001_transcription` initializes
 an empty application database; `0002_recording_language` and
-`0003_meeting_notes` and `0004_speaker_names` upgrade it (`0003` also inserts
+`0003_meeting_notes`, `0004_speaker_names` and `0005_study_notes` upgrade it (`0003` also inserts
 the built-in note agents). Run
 `alembic upgrade head` for both new installations and upgrades. Do not edit an
 applied migration or change version markers to bypass an upgrade. Schema parity

@@ -9,6 +9,7 @@ from app.api.v1.routes import (
     notes,
     notifications,
     speakers,
+    study,
     users,
     workspaces,
 )
@@ -20,6 +21,7 @@ for module in (
     workspaces,
     meetings,
     notes,
+    study,
     speakers,
     notifications,
     jobs,

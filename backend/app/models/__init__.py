@@ -42,6 +42,12 @@ from app.models.speaker_profile import (
     SpeakerProfile,  # noqa: F401
     SpeakerVoiceprint,  # noqa: F401
 )
+from app.models.study import (
+    HotkeyCredential,  # noqa: F401
+    StudyNote,  # noqa: F401
+    StudyNotebook,  # noqa: F401
+    StudySession,  # noqa: F401
+)
 from app.models.task_outbox import TaskOutbox  # noqa: F401
 from app.models.user import (
     Role,  # noqa: F401
