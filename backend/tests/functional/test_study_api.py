@@ -57,9 +57,12 @@ async def _start(client, wid, headers, notebook_id, **body) -> str:
     return session_id
 
 
-async def _put_note(client, wid, headers, session_id, seq, *, audio=True, note_id=None):
+async def _put_note(
+    client, wid, headers, session_id, seq, *, audio=True, note_id=None, **extra
+):
     note_id = note_id or str(uuid.uuid4())
     data = {"session_id": session_id, "seq": str(seq), "captured_ms": "522000"}
+    data |= extra
     files = {"image": ("frame.png", PNG, "image/png")}
     if audio:
         data |= {"audio_start_ms": "507000", "audio_end_ms": "543000"}
@@ -196,7 +199,7 @@ async def test_notes_are_idempotent_ordered_and_exported(
         document = archive.read("Query-plans.md").decode()
     assert "*Screenshot only. Tab audio was unavailable.*" in document
     assert "> Indexet används här." in document
-    assert "**My notes**\n\nCompare plans.\n" in document
+    assert "**My thoughts**\n\nCompare plans.\n" in document
     assert document.index("note-001") < document.index("note-002")
 
     # Wrong files are refused.
@@ -351,3 +354,98 @@ async def test_cancelled_session_discards_its_notes(
     assert (await client.delete(url, headers=user_token_headers)).status_code == 204
     assert (await client.delete(url, headers=user_token_headers)).status_code == 204
     assert (await db_session.execute(select(StudyNote))).scalars().all() == []
+
+
+async def test_tags_and_a_thought_come_with_the_capture_and_can_change(
+    client: AsyncClient,
+    user_token_headers: dict,
+    meetings_enabled: _FakeAudioStore,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings
+
+    wid = await _make_workspace(client, user_token_headers)
+    notebook = await _notebook(client, wid, user_token_headers, title="T")
+    base = f"{API}/workspaces/{wid}/study"
+    assert (
+        await client.get(f"{base}/features", headers=user_token_headers)
+    ).json() == {"enrich": False}
+    session_id = await _start(client, wid, user_token_headers, notebook["id"])
+    note_id, resp = await _put_note(
+        client,
+        wid,
+        user_token_headers,
+        session_id,
+        0,
+        audio=False,
+        tags="unclear,nonsense,important",
+        comment=" Why not a full scan? ",
+    )
+    body = resp.json()
+    # Known marks only, in a fixed order; the thought is the learner's comment.
+    assert body["tags"] == ["important", "unclear"]
+    assert body["comment"] == "Why not a full scan?"
+    assert body["enrich_status"] == "none"  # no model configured
+    url = f"{base}/notes/{note_id}"
+    changed = await client.patch(url, headers=user_token_headers, json={"tags": []})
+    assert changed.json()["tags"] == [] and changed.json()["comment"]
+    bad = await client.patch(url, headers=user_token_headers, json={"tags": ["exam"]})
+    assert bad.status_code == 422
+    refused = await client.post(f"{url}/enrich", headers=user_token_headers)
+    assert refused.status_code == 409
+
+    # With a model: a screenshot is read at once, and marking a note
+    # "did not understand" later asks for the explanation.
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "http://llm/v1")
+    second, resp = await _put_note(
+        client, wid, user_token_headers, session_id, 1, audio=False
+    )
+    assert resp.json()["enrich_status"] == "pending"
+    note = await db_session.get(StudyNote, uuid.UUID(second))
+    note.enrich_status = "ready"
+    await db_session.commit()
+    marked = await client.patch(
+        f"{base}/notes/{second}", headers=user_token_headers, json={"tags": ["unclear"]}
+    )
+    assert marked.json()["enrich_status"] == "pending"
+    tasks = (await db_session.execute(select(TaskOutbox))).scalars().all()
+    assert [row.task_name for row in tasks] == ["tasks.enrich_study_note"] * 2
+    # A session where the learner switched the model work off stays untouched.
+    quiet = await _start(client, wid, user_token_headers, notebook["id"], enrich=False)
+    _, resp = await _put_note(client, wid, user_token_headers, quiet, 0, audio=False)
+    assert resp.json()["enrich_status"] == "none"
+
+
+async def test_wider_context_comes_from_the_recordings_transcript(
+    client: AsyncClient,
+    user_token_headers: dict,
+    meetings_enabled: _FakeAudioStore,
+    db_session: AsyncSession,
+    normal_user: User,
+) -> None:
+    wid = await _make_workspace(client, user_token_headers)
+    notebook = await _notebook(client, wid, user_token_headers, title="T")
+    session_id = await _start(client, wid, user_token_headers, notebook["id"])
+    note_id, _ = await _put_note(client, wid, user_token_headers, session_id, 0)
+    url = f"{API}/workspaces/{wid}/study/notes/{note_id}/context"
+    # The recording is not uploaded yet: there is nothing to read from.
+    early = await client.get(url, headers=user_token_headers)
+    assert early.json()["available"] is False
+    assert early.json()["reason"] == "not_linked"
+
+    rec = await _seed_completed_recording(db_session, uuid.UUID(wid), normal_user)
+    await client.patch(
+        f"{API}/workspaces/{wid}/study/sessions/{session_id}",
+        headers=user_token_headers,
+        json={"recording_id": str(rec.id)},
+    )
+    # The note's audio is 08:27–09:03; the seeded talk is in the first 2 seconds.
+    near = (await client.get(url, headers=user_token_headers)).json()
+    assert near["available"] is True and near["segments"] == []
+    assert (near["start_ms"], near["end_ms"]) == (477_000, 573_000)
+    assert near["at_start"] is False and near["at_end"] is True
+    wide = (await client.get(f"{url}?seconds=600", headers=user_token_headers)).json()
+    assert [s["text"] for s in wide["segments"]] == ["Hello everyone.", "Hi there."]
+    assert wide["start_ms"] == 0 and wide["at_start"] is True
+    assert wide["segments"][0]["speaker"]

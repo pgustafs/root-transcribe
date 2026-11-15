@@ -6,6 +6,7 @@ getter so tests can replace it, like the transcription service.
 
 from __future__ import annotations
 
+import base64
 import logging
 from dataclasses import dataclass
 
@@ -71,6 +72,50 @@ class AgentRunner:
         if not answer:
             raise AgentRunError("The model returned an empty answer.")
         return AgentAnswer(text=answer, model=body.get("model") or None)
+
+    def chat_sync(
+        self,
+        *,
+        instructions: str,
+        text: str = "",
+        image: bytes | None = None,
+        image_type: str = "image/png",
+        timeout: float = 300,
+    ) -> AgentAnswer:
+        """One plain model call, optionally about an image. Raises
+        :class:`AgentRunError` with a readable reason."""
+        body: dict = {
+            "instructions": instructions,
+            "input": text,
+            "timeout_seconds": timeout,
+        }
+        if image is not None:
+            body["image_base64"] = base64.b64encode(image).decode("ascii")
+            body["image_type"] = image_type
+        try:
+            with log_operation(
+                logger, "agent.chat", chars=len(text), image=image is not None
+            ):
+                response = httpx.post(
+                    f"{settings.AGENT_RUNNER_URL.rstrip('/')}/chat",
+                    json=body,
+                    timeout=httpx.Timeout(timeout + 30, connect=10),
+                )
+        except httpx.HTTPError as exc:
+            raise AgentRunError(
+                f"The agent service could not be reached ({type(exc).__name__})."
+            ) from None
+        if response.status_code != 200:
+            raise AgentRunError(
+                f"The agent service answered HTTP {response.status_code}."
+            )
+        data = response.json()
+        if data.get("error"):
+            raise AgentRunError(str(data["error"])[:1500])
+        answer = str(data.get("answer") or "").strip()
+        if not answer:
+            raise AgentRunError("The model returned an empty answer.")
+        return AgentAnswer(text=answer, model=data.get("model") or None)
 
 
 _runner: AgentRunner | None = None

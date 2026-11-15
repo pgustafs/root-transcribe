@@ -16,7 +16,11 @@
     "modeLast15": "Last 15 seconds only",
     "modeUntilStoppedHelp": "The first press saves the frame and the 15 seconds before it. The next press ends the note.",
     "modeLast15Help": "Every press saves the frame and the 15 seconds before it.",
-    "notebookFailed": "The notebook could not be opened. Try again."
+    "notebookFailed": "The notebook could not be opened. Try again.",
+    "offerSlides": "Offer to keep a slide when it changes",
+    "offerSlidesHelp": "When a new slide appears, you can still keep the previous one as a note for 20 seconds, with what was said before the change.",
+    "enrich": "Improve notes with AI",
+    "enrichHelp": "Adds a title, a tidy version of the text, key terms and the text on the slide. The image and the text of each note are sent to this installation's language model."
   },
   "crop": {
     "title": "Choose what to save",
@@ -59,7 +63,8 @@
       "max_length": "The open note ended after 10 minutes.",
       "storage": "The note could not be saved in this browser.",
       "not_recording": "No recording is running.",
-      "source_changed": "The open note ended because the source changed."
+      "source_changed": "The open note ended because the source changed.",
+      "offer_gone": "That slide can no longer be kept."
     },
     "cancelAlsoNotes_one": "The {{count}} note taken in it is discarded too.",
     "cancelAlsoNotes_other": "The {{count}} notes taken in it are discarded too."
@@ -74,6 +79,20 @@
     "intro": "Share the tab with the next video. Notes from now on go to its notebook; the recording continues.",
     "share": "Share tab",
     "notShared": "No tab was shared. The current source is unchanged."
+  },
+  "marks": {
+    "label": "Mark the note",
+    "important": "Important",
+    "unclear": "Don't understand"
+  },
+  "thought": {
+    "label": "A thought for this note",
+    "placeholder": "Thought · Enter saves"
+  },
+  "offer": {
+    "keep": "Keep previous slide",
+    "line": "The slide changed",
+    "announce": "The slide changed. You can keep the previous slide as a note."
   },
   "page": {
     "notebooks": "Notebooks",
@@ -129,6 +148,34 @@
     "thoughtsFailed": "Could not save. Try again.",
     "actions": "More actions for the note at {{time}}",
     "openImage": "View image: {{alt}}",
-    "defaultNotebook": "Notes"
+    "defaultNotebook": "Notes",
+    "slideText": "Text on the slide",
+    "copy": "Copy",
+    "copied": "Copied",
+    "terms": "Key terms",
+    "explanation": "Explained simply",
+    "showOriginal": "Show original",
+    "showTidy": "Show tidy text",
+    "contextMore": "Show 30 seconds more",
+    "contextHide": "Hide",
+    "contextRange": "From the full recording, {{start}}–{{end}}",
+    "contextLabel": "What was said around this note, {{start}}–{{end}}",
+    "contextEmpty": "Nothing was said in this part.",
+    "contextReason": {
+      "not_linked": "Available when the recording has been uploaded and transcribed.",
+      "not_transcribed": "The recording has not been transcribed yet."
+    },
+    "contextFailed": "The surrounding text could not be loaded.",
+    "enrichAgain": "Improve with AI again",
+    "enriching": "Improving the note…",
+    "enrichFailed": "The note could not be improved.",
+    "tabNotes": "Notes",
+    "tabGlossary": "Glossary ({{count}})",
+    "filter": "Show notes",
+    "filterAll": "All",
+    "search": "Search notes",
+    "shown": "{{count}} of {{total}} notes shown",
+    "noMatch": "No notes match.",
+    "glossaryEmpty": "No key terms yet. They are added when notes are improved with AI."
   }
 }

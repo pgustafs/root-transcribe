@@ -11,6 +11,10 @@ export type StudyChoice = {
   sourceUrl: string;
   title: string;
   mode: StudyMode;
+  /** Let the language model work on the notes (when one is configured). */
+  enrich: boolean;
+  /** Offer to keep a slide when it changes. */
+  offerSlides: boolean;
 };
 
 export const EMPTY_STUDY_CHOICE: StudyChoice = {
@@ -18,6 +22,8 @@ export const EMPTY_STUDY_CHOICE: StudyChoice = {
   sourceUrl: "",
   title: "",
   mode: "until_stopped",
+  enrich: true,
+  offerSlides: true,
 };
 
 export function sourceUrlProblem(choice: StudyChoice): boolean {

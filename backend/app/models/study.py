@@ -16,6 +16,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -28,6 +29,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+#: What the learner can mark a note with at the press.
+NOTE_TAGS = ("important", "unclear")
+#: none = not asked for (or no model) | pending | processing | ready | failed
+ENRICH_STATUSES = ("none", "pending", "processing", "ready", "failed")
 
 NOTE_STATUSES = (
     "pending",
@@ -91,6 +97,9 @@ class StudySession(Base):
     mode: Mapped[str] = mapped_column(
         String(20), default="until_stopped", nullable=False
     )
+    # The learner asked for notes to be worked on by the language model
+    # (title, tidy text, key terms, text on the slide).
+    enrich: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
@@ -126,6 +135,24 @@ class StudyNote(Base):
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     # The owner's own words about this note, kept apart from the transcript.
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Marks set by the learner: a list of NOTE_TAGS.
+    tags: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    # --- written by the language model, never by the learner ---
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # ``text`` without fillers and with sentence breaks; ``text`` stays as said.
+    clean_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # What can be read in the image (Markdown): text, formulas, code.
+    slide_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [{"term": "...", "definition": "..."}]
+    terms: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # A plain-language explanation, for notes marked "unclear".
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enrich_status: Mapped[str] = mapped_column(
+        String(20), default="none", nullable=False
+    )
+    enrich_error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # How many times the model work was queued (dedupe key of the task).
+    enrich_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Why a note that was still open ended (paused, stopped, source_changed,
     # sharing_lost). NULL = the learner stopped it.
     end_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)

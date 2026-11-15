@@ -314,3 +314,53 @@ def fail_sync(session: Session, *, note_id: uuid.UUID, error: str) -> None:
     note.status = "failed"
     note.error = error[:2000]
     session.commit()
+
+
+# --- model work on a note (title, tidy text, terms, slide text) ----------------
+
+
+def enrich_wanted(study_session: StudySession | None) -> bool:
+    """The learner asked for it and a language model is configured."""
+    return bool(
+        study_session is not None
+        and study_session.enrich
+        and settings.LLM_BASE_URL.strip()
+    )
+
+
+def _enrich_outbox(note: StudyNote) -> dict:
+    note.enrich_count = (note.enrich_count or 0) + 1
+    note.enrich_status = "pending"
+    note.enrich_error = None
+    return {
+        "task_name": "tasks.enrich_study_note",
+        "queue": "celery",
+        "payload": {"note_id": str(note.id)},
+        "dedupe_key": f"study-note:{note.id}:enrich:{note.enrich_count}",
+    }
+
+
+async def queue_enrich(
+    session: AsyncSession, note: StudyNote, *, headers: dict | None = None
+):
+    from app.crud import task_outbox as task_outbox_crud
+
+    return await task_outbox_crud.enqueue(
+        session, headers=headers, **_enrich_outbox(note)
+    )
+
+
+def queue_enrich_sync(session: Session, note: StudyNote):
+    from app.crud import task_outbox as task_outbox_crud
+
+    return task_outbox_crud.enqueue_sync(session, **_enrich_outbox(note))
+
+
+def claim_enrich_sync(session: Session, *, note_id: uuid.UUID) -> bool:
+    result = session.execute(
+        sa_update(StudyNote)
+        .where(StudyNote.id == note_id, StudyNote.enrich_status == "pending")
+        .values(enrich_status="processing")
+    )
+    session.commit()
+    return bool(result.rowcount)

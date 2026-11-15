@@ -791,6 +791,48 @@ The floating window needs Chrome or Edge 116 or later. It is a window of its
 own, so it is never part of a saved frame. With the window focused, Space or
 Enter presses the button.
 
+### Marks, a quick thought and slide changes
+
+Next to **Take note**, in the floating window and in the recording bar:
+
+- **Important** and **Don't understand** take a note that carries that mark.
+  On a note that is still open they switch the mark on or off instead.
+- **Thought**: type a line and press Enter. It is saved with the open note, or
+  takes a note of its own. A line typed before pressing any of the buttons
+  goes along with that press. It ends up under *My thoughts*.
+- **Keep previous slide**: with *Offer to keep a slide when it changes* on
+  (the default), the app looks at the shared tab every two seconds. When one
+  still picture is replaced by another, the slide that went away can be kept
+  as a note for 20 seconds, with up to 15 seconds of what was said before the
+  change. Moving video never counts as a slide.
+
+### What the language model adds
+
+With a text model configured (see [Documents written by agents](#documents-written-by-agents))
+and *Improve notes with AI* on, each note gets, a little while after its
+transcript:
+
+- a short **title**;
+- a **tidy transcript** without filler words. *Show original* brings back the
+  words as they were transcribed; the original is never changed, and a tidy
+  version that lost or added too much is thrown away;
+- **key terms** with a definition each, collected in the notebook's
+  **Glossary** tab;
+- for notes marked *Don't understand*, a plain **explanation**;
+- the **text on the slide** (text, code, formulas, tables), which needs a
+  model that can read images. With a text-only model this part is skipped and
+  the rest still works.
+
+The image and the text of a note are sent to the installation's own model
+endpoint, nowhere else. **Improve with AI again** in a note's menu repeats it.
+
+**Show 30 seconds more** under a transcript shows what was said before and
+after the note, taken from the transcript of the full recording once that has
+been uploaded and transcribed. The notebook can be searched (titles,
+transcripts, slide text, thoughts, terms) and filtered by mark.
+
+Ideas that are not built yet are in [NOTEBOOK_IDEAS.md](NOTEBOOK_IDEAS.md).
+
 ## Measure transcription quality
 
 `eval/ami_eval.py` scores a running installation against a meeting from the

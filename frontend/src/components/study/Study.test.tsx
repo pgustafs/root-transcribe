@@ -49,6 +49,13 @@ beforeEach(async () => {
 
 // --- the dock -------------------------------------------------------------------
 
+const actions = () => ({
+  onToggle: vi.fn(),
+  onMark: vi.fn(),
+  onThought: vi.fn(),
+  onKeepOffer: vi.fn(),
+});
+
 function dock(
   status: Partial<StudyStatus>,
   over: Partial<StudyDockProps> = {},
@@ -62,7 +69,7 @@ function dock(
       videoAvailable: true,
       ...status,
     },
-    onToggle: vi.fn(),
+    actions: actions(),
     onViewNotes: vi.fn(),
     onChangeSource: vi.fn(),
     ...over,
@@ -94,7 +101,7 @@ function dock(
 it("dock: takes a note and keeps the recording controls", async () => {
   const study = dock({ count: 3 });
   await userEvent.click(screen.getByRole("button", { name: "Take note" }));
-  expect(study.onToggle).toHaveBeenCalledOnce();
+  expect(study.actions.onToggle).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "View 3 notes" })).toBeEnabled();
   for (const name of ["Pause", "Stop & transcribe", "Cancel", "Change source"])
     expect(screen.getByRole("button", { name })).toBeEnabled();
@@ -138,7 +145,7 @@ it("dock: says when notes are screenshots only", () => {
 // --- the floating window --------------------------------------------------------
 
 function float(status: Partial<StudyStatus>, over: { paused?: boolean } = {}) {
-  const onToggle = vi.fn();
+  const given = actions();
   wrap(
     <FloatingNotePanel
       status={{
@@ -151,19 +158,49 @@ function float(status: Partial<StudyStatus>, over: { paused?: boolean } = {}) {
       recording={!over.paused}
       paused={Boolean(over.paused)}
       durationMs={543_000}
-      onToggle={onToggle}
+      actions={given}
     />,
   );
-  return onToggle;
+  return given;
 }
 
 it("floating window: one focused button that takes and stops a note", async () => {
-  const onToggle = float({ count: 2 });
+  const given = float({ count: 2 });
   const take = screen.getByRole("button", { name: "Take note" });
   expect(take).toHaveFocus();
   expect(screen.getByText("2 notes")).toBeInTheDocument();
   await userEvent.keyboard("{Enter}");
-  expect(onToggle).toHaveBeenCalledOnce();
+  expect(given.onToggle).toHaveBeenCalledOnce();
+});
+
+it("floating window: marks, a thought and the slide offer", async () => {
+  const given = float({
+    openSinceMs: 522_000,
+    openTags: ["important"],
+    offer: { id: "o1", capturedMs: 500_000 },
+  });
+  // Marks show their state on the open note.
+  expect(screen.getByRole("button", { name: "Important" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const unclear = screen.getByRole("button", { name: "Don't understand" });
+  expect(unclear).toHaveAttribute("aria-pressed", "false");
+  // A typed thought goes with the next button that is pressed.
+  const field = screen.getByRole("textbox", {
+    name: "A thought for this note",
+  });
+  await userEvent.type(field, "Why not a full scan?");
+  await userEvent.click(unclear);
+  expect(given.onMark).toHaveBeenCalledWith("unclear", "Why not a full scan?");
+  expect(field).toHaveValue("");
+  // Enter saves a thought on its own.
+  await userEvent.type(field, "Ask on Friday{Enter}");
+  expect(given.onThought).toHaveBeenCalledWith("Ask on Friday");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Keep previous slide" }),
+  );
+  expect(given.onKeepOffer).toHaveBeenCalledOnce();
 });
 
 it("floating window: shows the open note's length", () => {
@@ -239,6 +276,14 @@ const note = (seq: number, over: Partial<StudyNote>): StudyNote => ({
   text: "The database can use this index.",
   error: null,
   comment: null,
+  tags: [],
+  title: null,
+  clean_text: null,
+  slide_text: null,
+  terms: null,
+  explanation: null,
+  enrich_status: "none",
+  enrich_error: null,
   end_reason: null,
   source_time_url: null,
   created_at: "2026-11-15T10:00:00Z",
@@ -270,6 +315,9 @@ function notebookPage(notes: StudyNote[]) {
   server.use(
     http.get(`${API}/workspaces/w1/study/notebooks/nb1`, () =>
       HttpResponse.json(detail),
+    ),
+    http.get(`${API}/workspaces/w1/study/features`, () =>
+      HttpResponse.json({ enrich: true }),
     ),
     http.get(`${API}/workspaces/w1/study/notes/:id/image`, () =>
       HttpResponse.arrayBuffer(new Uint8Array([1, 2, 3]).buffer, {
@@ -381,6 +429,117 @@ it("notebook: own thoughts are saved apart from the transcript", async () => {
   await userEvent.click(fields[1]);
   await userEvent.tab();
   expect(sent).toHaveLength(1);
+});
+
+it("notebook: what the model added, marks, search, glossary and wider context", async () => {
+  const patched: unknown[] = [];
+  server.use(
+    http.patch(`${API}/workspaces/w1/study/notes/n1`, async ({ request }) => {
+      const body = (await request.json()) as { tags: StudyNote["tags"] };
+      patched.push(body);
+      return HttpResponse.json(
+        note(1, { text: "Joins come next.", tags: body.tags }),
+      );
+    }),
+    http.get(`${API}/workspaces/w1/study/notes/n0/context`, ({ request }) => {
+      const seconds = Number(new URL(request.url).searchParams.get("seconds"));
+      return HttpResponse.json({
+        available: true,
+        reason: null,
+        start_ms: 507_000 - seconds * 1000,
+        end_ms: 543_000 + seconds * 1000,
+        at_start: false,
+        at_end: false,
+        segments: [
+          {
+            start_ms: 480_000,
+            end_ms: 500_000,
+            speaker: "Anna",
+            text: "Before that we looked at full scans.",
+          },
+        ],
+      });
+    }),
+  );
+  notebookPage([
+    note(0, {
+      title: "Index scan",
+      text: "so um the database can use this index",
+      clean_text: "The database can use this index.",
+      slide_text: "# Query plan\n\n`SELECT 1;`",
+      terms: [{ term: "Index", definition: "A lookup structure." }],
+      explanation: "It looks things up instead of reading everything.",
+      tags: ["unclear"],
+      enrich_status: "ready",
+    }),
+    note(1, { text: "Joins come next.", enrich_status: "pending" }),
+  ]);
+  const entries = await screen.findAllByRole("article");
+  const first = within(entries[0]);
+  // The generated title is the heading; the time moves to the line below.
+  expect(
+    first.getByRole("heading", { name: "Index scan" }),
+  ).toBeInTheDocument();
+  expect(first.getByText(/At 08:42 in this recording/)).toBeInTheDocument();
+  expect(first.getByText("Don't understand")).toBeInTheDocument();
+  expect(
+    first.getByText("It looks things up instead of reading everything."),
+  ).toBeInTheDocument();
+  expect(first.getByText("A lookup structure.")).toBeInTheDocument();
+  // Tidy text first; what was actually said is one click away.
+  expect(
+    first.getByText("The database can use this index."),
+  ).toBeInTheDocument();
+  await userEvent.click(first.getByRole("button", { name: "Show original" }));
+  expect(
+    first.getByText("so um the database can use this index"),
+  ).toBeInTheDocument();
+  // The slide text is folded away until asked for.
+  expect(first.queryByText("Query plan")).not.toBeInTheDocument();
+  await userEvent.click(
+    first.getByRole("button", { name: "Text on the slide" }),
+  );
+  expect(
+    first.getByRole("heading", { name: "Query plan" }),
+  ).toBeInTheDocument();
+  // Wider context comes from the full recording.
+  await userEvent.click(
+    first.getByRole("button", { name: "Show 30 seconds more" }),
+  );
+  expect(
+    await first.findByText("Before that we looked at full scans."),
+  ).toBeInTheDocument();
+  expect(
+    first.getByText("From the full recording, 07:57–09:33"),
+  ).toBeInTheDocument();
+  // The second note is still being worked on, and can be marked by hand.
+  const second = within(entries[1]);
+  expect(second.getByText("Improving the note…")).toBeInTheDocument();
+  await userEvent.click(
+    second.getByRole("button", { name: /More actions for the note/ }),
+  );
+  await userEvent.click(
+    await screen.findByRole("menuitemcheckbox", { name: "Important" }),
+  );
+  await waitFor(() => expect(patched).toEqual([{ tags: ["important"] }]));
+
+  // Search looks in the slide text too; the filter narrows by mark.
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "Search notes" }),
+    "select",
+  );
+  expect(screen.getAllByRole("article")).toHaveLength(1);
+  await userEvent.clear(screen.getByRole("textbox", { name: "Search notes" }));
+  await userEvent.click(screen.getByRole("radio", { name: "Important" }));
+  await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(1));
+  expect(
+    within(screen.getByRole("article")).getByText("Joins come next."),
+  ).toBeInTheDocument();
+  // The glossary lists each term once and leads back to its note.
+  await userEvent.click(screen.getByRole("tab", { name: "Glossary (1)" }));
+  expect(await screen.findByText("Index")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Index scan" }));
+  expect(await screen.findAllByRole("article")).toHaveLength(2);
 });
 
 it("notebook: a refused export says why", async () => {

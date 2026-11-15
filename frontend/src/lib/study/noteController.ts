@@ -4,7 +4,12 @@
  *
  * A press is one transition: `idle → open` (frame saved, look-back taken) or
  * `open → idle` (the note is complete). Presses run one at a time, so two
- * clicks can never act on the same state twice.
+ * clicks can never act on the same state twice. A press can carry a mark
+ * ("important", "unclear") and a thought the learner typed.
+ *
+ * The shared tab is also watched for slide changes: when a still picture is
+ * replaced by another, the one that went away is offered as a note for a
+ * short while, with the talk that came before the change.
  *
  * Everything is written to IndexedDB before it is sent. Uploading is a
  * separate, repeatable step that also runs after a reload.
@@ -13,6 +18,7 @@
 import axios from "axios";
 
 import * as studyApi from "@/api/study";
+import type { NoteTag } from "@/api/study";
 import {
   type Crop,
   FrameGrabber,
@@ -20,6 +26,12 @@ import {
   FULL_FRAME,
 } from "@/lib/study/frame";
 import * as store from "@/lib/study/noteStore";
+import {
+  frameSignature,
+  OFFER_MS,
+  SAMPLE_MS,
+  SlideDetector,
+} from "@/lib/study/slideWatch";
 import type {
   StoredNote,
   StoredStudySession,
@@ -54,8 +66,17 @@ export type PressResult = {
   has_audio?: boolean;
 };
 
-/** A frame that is held in memory, not yet encoded. */
-export type PinnedFrame = { encode: (crop: Crop) => Promise<Blob> };
+/** A frame that is held in memory, not yet encoded. Either `encode` or
+ * `release` ends it. */
+export type PinnedFrame = {
+  encode: (crop: Crop) => Promise<Blob>;
+  /** A small grey picture of the frame, for noticing slide changes. */
+  signature: () => Uint8Array;
+  release: () => void;
+};
+
+/** What a press can carry besides the frame and the audio. */
+export type PressExtra = { thought?: string };
 
 /** What the shared tab gives us: frames and (maybe) audio. */
 export type CaptureSource = {
@@ -67,6 +88,9 @@ export type CaptureSource = {
    * it (slow for a large frame) is the separate `encode` step. */
   grab: () => Promise<PinnedFrame>;
   onLost: (listener: () => void) => void;
+  /** Called regularly while the tab is shared (not slowed down when this
+   * page is in the background). */
+  onTick: (listener: () => void) => void;
   close: () => void;
 };
 
@@ -79,6 +103,10 @@ export type StudyStatus = {
   mode: StudyMode;
   /** Recording-clock time the open note was taken at; null when none is open. */
   openSinceMs: number | null;
+  /** Marks on the open note. */
+  openTags: NoteTag[];
+  /** A slide just went away and can still be kept as a note. */
+  offer: { id: string; capturedMs: number } | null;
   /** Notes taken in this recording. */
   count: number;
   /** Notes not yet confirmed by the server. */
@@ -99,6 +127,8 @@ export const IDLE_STUDY: StudyStatus = {
   notebookTitle: null,
   mode: "until_stopped",
   openSinceMs: null,
+  openTags: [],
+  offer: null,
   count: 0,
   waiting: 0,
   audioAvailable: false,
@@ -114,6 +144,10 @@ export type BeginOptions = {
   language: string;
   mode: StudyMode;
   localRecordingId: string;
+  /** Let the language model work on the notes. */
+  enrich?: boolean;
+  /** Offer to keep a slide when it changes. */
+  offerSlides?: boolean;
 };
 
 export type ControllerDeps = {
@@ -133,6 +167,8 @@ type OpenNote = {
   id: string;
   capturedMs: number;
   audioStartMs: number;
+  tags: NoteTag[];
+  comment: string;
   writes: Promise<void>[];
   /** The note's record (with its image) is in IndexedDB. */
   stored: Promise<void>;
@@ -149,6 +185,8 @@ export async function createCaptureSource(
   const grabber = videoTrack ? new FrameGrabber(videoTrack) : null;
   let context: AudioContext | null = null;
   let buffer: TabAudioBuffer | null = null;
+  const ticks = new Set<() => void>();
+  let ticker: ReturnType<typeof setInterval> | null = null;
   if (audioTrack) {
     try {
       // A 16 kHz context: the browser resamples, notes stay small.
@@ -158,8 +196,12 @@ export async function createCaptureSource(
       );
       const tap = new AudioWorkletNode(context, "study-tap");
       const active = new TabAudioBuffer(context.sampleRate);
-      tap.port.onmessage = (event: MessageEvent<Float32Array>) =>
+      tap.port.onmessage = (event: MessageEvent<Float32Array>) => {
         active.append(event.data);
+        // Audio blocks keep arriving in a background tab, where timers are
+        // slowed down: they are the clock for watching the picture.
+        ticks.forEach((tick) => tick());
+      };
       context
         .createMediaStreamSource(new MediaStream([audioTrack]))
         .connect(tap);
@@ -190,12 +232,22 @@ export async function createCaptureSource(
             frame.close();
           }
         },
+        signature: () => frameSignature(frame),
+        release: () => frame.close(),
       };
     },
     onLost: (listener) => {
       videoTrack?.addEventListener("ended", listener);
     },
+    onTick: (listener) => {
+      ticks.add(listener);
+      // Without tab audio there are no blocks to count on.
+      if (!buffer && ticker === null)
+        ticker = setInterval(() => ticks.forEach((tick) => tick()), 1000);
+    },
     close: () => {
+      if (ticker !== null) clearInterval(ticker);
+      ticks.clear();
       grabber?.close();
       void context?.close().catch(() => {});
     },
@@ -227,6 +279,7 @@ async function ensureServerSession(
     notebook_id: session.notebookId,
     language: session.language,
     mode: session.mode,
+    enrich: session.enrich ?? true,
     started_at: session.startedAt,
   });
   knownSessions.add(session.id);
@@ -256,6 +309,8 @@ async function flushOnce(
         audioStartMs: note.audioStartMs,
         audioEndMs: note.audioEndMs,
         endReason: note.endReason,
+        tags: note.tags ?? [],
+        comment: note.comment ?? null,
       });
       await store.markUploaded(note.id);
     } catch (error) {
@@ -415,12 +470,37 @@ export async function countStudyNotes(
 
 // --- the controller ----------------------------------------------------------
 
+type Held = { frame: PinnedFrame; atMs: number };
+type Offer = {
+  id: string;
+  frame: PinnedFrame;
+  capturedMs: number;
+  lookback: Float32Array | null;
+  /** Recording-clock time the slide stopped showing (end of its audio). */
+  endMs: number;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+function joinThought(current: string, added: string | undefined): string {
+  const next = (added ?? "").trim();
+  if (!next) return current;
+  return current ? `${current}\n${next}` : next;
+}
+
 export class StudyNoteController {
   private status: StudyStatus = IDLE_STUDY;
   private session: StoredStudySession | null = null;
   private source: CaptureSource | null = null;
   private open: OpenNote | null = null;
   private chain: Promise<unknown> = Promise.resolve();
+  // Watching for slide changes.
+  private detector = new SlideDetector();
+  private held: Held | null = null;
+  private leaving: { lookback: Float32Array | null; atMs: number } | null =
+    null;
+  private offer: Offer | null = null;
+  private lastSampleAt = 0;
+  private sampling = false;
   private readonly api: NonNullable<ControllerDeps["api"]>;
   private readonly newId: () => string;
   private readonly onFlush = () => void this.refreshCounts();
@@ -479,6 +559,8 @@ export class StudyNoteController {
         crop: FULL_FRAME,
         nextSeq: 0,
         startedAt: new Date().toISOString(),
+        enrich: options.enrich ?? true,
+        offerSlides: options.offerSlides ?? false,
         localRecordingId: options.localRecordingId,
         recordingId: null,
         linked: false,
@@ -495,9 +577,11 @@ export class StudyNoteController {
         void this.serialized(async () => {
           if (this.source !== source) return;
           await this.finishOpen("sharing_lost");
+          this.forgetSlides(true);
           this.set({ videoAvailable: false, notice: "sharing_lost" });
         });
       });
+      if (session.offerSlides) source.onTick(() => this.tick(source));
       flushListeners.add(this.onFlush);
       this.set({
         ...IDLE_STUDY,
@@ -535,16 +619,44 @@ export class StudyNoteController {
   }
 
   /**
-   * One press of Take note / Stop note. The decision and the pinning (frame
-   * held, look-back taken, state changed) happen in turn, one press at a
-   * time, and take a few tens of milliseconds. Encoding and storing the image
-   * then finish outside the queue, so the next press is not held up.
+   * Take note / Stop note. The decision and the pinning (frame held,
+   * look-back taken, state changed) happen in turn, one press at a time, and
+   * take a few tens of milliseconds. Encoding and storing the image then
+   * finish outside the queue, so the next press is not held up.
    */
-  async toggle(): Promise<PressResult> {
+  toggle(extra: PressExtra = {}): Promise<PressResult> {
+    return this.act({ kind: "press", thought: extra.thought });
+  }
+
+  /**
+   * A mark. With no note open it takes a note that carries the mark; on an
+   * open note it switches the mark on or off and the note stays open.
+   */
+  mark(tag: NoteTag, extra: PressExtra = {}): Promise<PressResult> {
+    return this.act({ kind: "mark", tag, thought: extra.thought });
+  }
+
+  /** A thought. It goes on the open note, or takes a note that carries it. */
+  addThought(thought: string): Promise<PressResult> {
+    return this.act({ kind: "thought", thought });
+  }
+
+  /** Stop the open note. */
+  stopNote(): Promise<void> {
+    return this.serialized(async () => {
+      await this.finishOpen(null);
+    });
+  }
+
+  private async act(action: {
+    kind: "press" | "mark" | "thought";
+    tag?: NoteTag;
+    thought?: string;
+  }): Promise<PressResult> {
     let result: PressResult;
     try {
       const pending = await this.serialized(async () => ({
-        settled: await this.decide(),
+        settled: await this.decide(action),
       }));
       result = await pending.settled;
     } catch {
@@ -556,29 +668,57 @@ export class StudyNoteController {
     return result;
   }
 
-  /** Stop the open note. */
-  stopNote(): Promise<void> {
-    return this.serialized(async () => {
-      await this.finishOpen(null);
-    });
-  }
-
   /** Runs inside the queue. Returns the rest of the work as a promise. */
-  private async decide(): Promise<Promise<PressResult> | PressResult> {
+  private async decide(action: {
+    kind: "press" | "mark" | "thought";
+    tag?: NoteTag;
+    thought?: string;
+  }): Promise<Promise<PressResult> | PressResult> {
     if (!this.session || !this.source)
       return { outcome: "error", reason: "not_recording" };
-    if (this.open) return this.finishOpen(null);
+    const open = this.open;
+    if (open) {
+      open.comment = joinThought(open.comment, action.thought);
+      if (action.kind === "press") return this.finishOpen(null);
+      if (action.kind === "mark" && action.tag) {
+        const tag = action.tag;
+        open.tags = open.tags.includes(tag)
+          ? open.tags.filter((item) => item !== tag)
+          : [...open.tags, tag];
+        this.set({ openTags: open.tags });
+      }
+      this.persistOpen(open);
+      return {
+        outcome: "started",
+        captured_ms: open.capturedMs,
+        audio_start_ms: open.audioStartMs,
+      };
+    }
     if (this.deps.isPaused()) return { outcome: "error", reason: "paused" };
     if (!this.source.hasVideo || !this.source.isLive())
       return { outcome: "error", reason: "sharing_lost" };
-    return this.capture();
+    return this.capture(
+      action.tag ? [action.tag] : [],
+      (action.thought ?? "").trim(),
+    );
+  }
+
+  /** Keep the open note's marks and thought safe from a reload. */
+  private persistOpen(open: OpenNote): void {
+    const patch = { tags: [...open.tags], comment: open.comment || null };
+    void open.stored
+      .then(() => store.patchNote(open.id, patch))
+      .catch(() => {});
   }
 
   /**
    * Pin a capture (inside the queue), and return the storing of it as a
    * promise that the queue does not wait for.
    */
-  private async capture(): Promise<Promise<PressResult>> {
+  private async capture(
+    tags: NoteTag[],
+    comment: string,
+  ): Promise<Promise<PressResult>> {
     const session = this.session as StoredStudySession;
     const source = this.source as CaptureSource;
     const capturedMs = Math.max(0, Math.round(this.deps.clock()));
@@ -628,6 +768,8 @@ export class StudyNoteController {
       hasAudio: false,
       state: "open",
       endReason: null,
+      tags: [...tags],
+      comment: comment || null,
       createdAt: Date.now(),
     };
     const crop = session.crop;
@@ -642,6 +784,8 @@ export class StudyNoteController {
         id,
         capturedMs,
         audioStartMs,
+        tags: [...tags],
+        comment,
         writes,
         stored,
         timer: setTimeout(() => {
@@ -653,7 +797,7 @@ export class StudyNoteController {
           });
         }, MAX_NOTE_MS),
       };
-      this.set({ openSinceMs: capturedMs });
+      this.set({ openSinceMs: capturedMs, openTags: [...tags] });
       return stored.then(
         (): PressResult => {
           void this.refreshCounts();
@@ -670,35 +814,45 @@ export class StudyNoteController {
             if (this.open.timer) clearTimeout(this.open.timer);
             this.open = null;
             buffer?.endNote();
-            this.set({ openSinceMs: null });
+            this.set({ openSinceMs: null, openTags: [] });
           });
           return { outcome: "error", reason: "storage" };
         },
       );
     }
     // One complete note per press ("Last 15 seconds only"), or no tab audio.
-    const hasAudio = lookback !== null;
-    return (async (): Promise<PressResult> => {
-      const image = await pinned.encode(crop);
-      await store.putNote({
-        ...base,
-        image,
-        state: "queued",
-        audio: lookback ? encodeWav([lookback], rate) : null,
-        hasAudio,
-        audioEndMs: hasAudio ? capturedMs : null,
-      });
-      this.set({ savedTick: this.status.savedTick + 1 });
-      void this.refreshCounts();
-      void flushStudyNotes(this.api);
-      return {
-        outcome: "saved",
-        captured_ms: capturedMs,
-        audio_start_ms: hasAudio ? audioStartMs : null,
-        audio_end_ms: hasAudio ? capturedMs : null,
-        has_audio: hasAudio,
-      };
-    })();
+    return this.storeComplete(base, pinned, crop, lookback, capturedMs);
+  }
+
+  /** Encode and store a note that is complete at once. */
+  private async storeComplete(
+    base: StoredNote,
+    pinned: PinnedFrame,
+    crop: Crop,
+    lookback: Float32Array | null,
+    audioEndMs: number,
+  ): Promise<PressResult> {
+    const hasAudio = lookback !== null && lookback.length > 0;
+    const image = await pinned.encode(crop);
+    await store.putNote({
+      ...base,
+      image,
+      state: "queued",
+      audio: hasAudio ? encodeWav([lookback], base.sampleRate) : null,
+      hasAudio,
+      audioStartMs: hasAudio ? base.audioStartMs : null,
+      audioEndMs: hasAudio ? audioEndMs : null,
+    });
+    this.set({ savedTick: this.status.savedTick + 1 });
+    void this.refreshCounts();
+    void flushStudyNotes(this.api);
+    return {
+      outcome: "saved",
+      captured_ms: base.capturedMs,
+      audio_start_ms: hasAudio ? base.audioStartMs : null,
+      audio_end_ms: hasAudio ? audioEndMs : null,
+      has_audio: hasAudio,
+    };
   }
 
   /** Complete the open note at the last sample we have. */
@@ -724,9 +878,15 @@ export class StudyNoteController {
         hasAudio: true,
         audioEndMs,
         endReason: reason,
+        tags: [...open.tags],
+        comment: open.comment || null,
       });
     }
-    this.set({ openSinceMs: null, savedTick: this.status.savedTick + 1 });
+    this.set({
+      openSinceMs: null,
+      openTags: [],
+      savedTick: this.status.savedTick + 1,
+    });
     void this.refreshCounts();
     void flushStudyNotes(this.api);
     return {
@@ -738,6 +898,150 @@ export class StudyNoteController {
     };
   }
 
+  // --- slide changes ---------------------------------------------------------
+
+  /** Look at the shared tab now and then (driven by the source's ticks). */
+  private tick(source: CaptureSource): void {
+    if (this.source !== source || this.sampling) return;
+    const now = performance.now();
+    if (now - this.lastSampleAt < SAMPLE_MS) return;
+    if (this.deps.isPaused() || !source.hasVideo || !source.isLive()) return;
+    this.lastSampleAt = now;
+    this.sampling = true;
+    void this.sample(source).finally(() => {
+      this.sampling = false;
+    });
+  }
+
+  /** One look at the shared tab. Exposed for tests. */
+  async sample(source: CaptureSource | null = this.source): Promise<void> {
+    if (!source) return;
+    let frame: PinnedFrame;
+    try {
+      frame = await source.grab();
+    } catch {
+      return;
+    }
+    if (this.source !== source) {
+      frame.release();
+      return;
+    }
+    const atMs = Math.max(0, Math.round(this.deps.clock()));
+    const { verdict, hold } = this.detector.feed(frame.signature());
+    if (verdict === "leaving") {
+      // The talk about the slide that was showing ends here.
+      this.leaving = { lookback: source.buffer?.lookback() ?? null, atMs };
+    }
+    if (!hold) {
+      frame.release();
+      return;
+    }
+    const previous = this.held;
+    this.held = { frame, atMs };
+    if (verdict === "changed" && previous) {
+      const left = this.leaving ?? {
+        lookback: source.buffer?.lookback() ?? null,
+        atMs,
+      };
+      this.makeOffer(previous, left);
+    } else {
+      previous?.frame.release();
+    }
+    this.leaving = null;
+  }
+
+  private makeOffer(
+    slide: Held,
+    left: { lookback: Float32Array | null; atMs: number },
+  ): void {
+    this.dropOffer();
+    const id = this.newId();
+    this.offer = {
+      id,
+      frame: slide.frame,
+      capturedMs: slide.atMs,
+      lookback: left.lookback,
+      endMs: left.atMs,
+      timer: setTimeout(() => {
+        if (this.offer?.id === id) this.dropOffer();
+      }, OFFER_MS),
+    };
+    this.set({ offer: { id, capturedMs: slide.atMs } });
+  }
+
+  private dropOffer(): void {
+    const offer = this.offer;
+    if (!offer) return;
+    this.offer = null;
+    clearTimeout(offer.timer);
+    offer.frame.release();
+    if (this.status.offer) this.set({ offer: null });
+  }
+
+  private forgetSlides(alsoOffer: boolean): void {
+    this.detector.reset();
+    this.held?.frame.release();
+    this.held = null;
+    this.leaving = null;
+    if (alsoOffer) this.dropOffer();
+  }
+
+  /** Keep the slide that just went away as a note. */
+  async keepOffer(extra: PressExtra = {}): Promise<PressResult> {
+    let result: PressResult;
+    try {
+      const pending = await this.serialized(async () => {
+        const offer = this.offer;
+        const session = this.session;
+        const source = this.source;
+        if (!offer || !session || !source)
+          return {
+            settled: { outcome: "error", reason: "offer_gone" } as PressResult,
+          };
+        this.offer = null;
+        clearTimeout(offer.timer);
+        this.set({ offer: null });
+        const rate = source.buffer?.sampleRate ?? NOTE_SAMPLE_RATE;
+        const samples = offer.lookback?.length ?? 0;
+        const seq = await store.takeSeq(session.id);
+        const base: StoredNote = {
+          id: offer.id,
+          sessionId: session.id,
+          workspaceId: session.workspaceId,
+          notebookId: session.notebookId,
+          seq,
+          capturedMs: offer.capturedMs,
+          audioStartMs: Math.max(0, offer.endMs - samplesToMs(samples, rate)),
+          audioEndMs: null,
+          sampleRate: rate,
+          image: null,
+          audio: null,
+          hasAudio: false,
+          state: "open",
+          endReason: null,
+          tags: [],
+          comment: (extra.thought ?? "").trim() || null,
+          createdAt: Date.now(),
+        };
+        return {
+          settled: this.storeComplete(
+            base,
+            offer.frame,
+            session.crop,
+            offer.lookback,
+            offer.endMs,
+          ),
+        };
+      });
+      result = await pending.settled;
+    } catch {
+      result = { outcome: "error", reason: "storage" };
+    }
+    return result;
+  }
+
+  // --- the recording's own state ----------------------------------------------
+
   /** The recording was paused: an open note ends, and nothing is kept until
    * it resumes (no audio from before the pause can reach a later note). */
   pause(): Promise<void> {
@@ -746,6 +1050,7 @@ export class StudyNoteController {
         await this.finishOpen("paused");
         this.set({ notice: "paused" });
       }
+      this.forgetSlides(true);
       this.source?.buffer?.setGate(false);
       this.source?.buffer?.reset();
     });
@@ -761,6 +1066,7 @@ export class StudyNoteController {
 
   private async detach(reason: EndReason): Promise<void> {
     if (this.open) await this.finishOpen(reason);
+    this.forgetSlides(true);
     this.source?.close();
     this.source = null;
     if (this.session) {

@@ -28,6 +28,10 @@ export type StoredStudySession = {
   crop: Crop;
   nextSeq: number;
   startedAt: string;
+  /** Let the language model work on the notes (absent = yes). */
+  enrich?: boolean;
+  /** Offer to keep a slide when it changes (absent = no). */
+  offerSlides?: boolean;
   /** The recorder's local session this belongs to (linked at upload). */
   localRecordingId: string;
   /** Set when the meeting recording exists on the server. */
@@ -55,6 +59,10 @@ export type StoredNote = {
   hasAudio: boolean;
   state: StoredNoteState;
   endReason: string | null;
+  /** Marks set at the press (absent in older records). */
+  tags?: string[];
+  /** A thought written at the press. */
+  comment?: string | null;
   createdAt: number;
 };
 
@@ -188,6 +196,18 @@ export async function deleteSession(id: string): Promise<void> {
 
 export async function putNote(note: StoredNote): Promise<void> {
   await (await db()).put("notes", note);
+}
+
+/** Change fields of a stored note; nothing happens when it is gone. */
+export async function patchNote(
+  id: string,
+  patch: Partial<StoredNote>,
+): Promise<void> {
+  const database = await db();
+  const tx = database.transaction("notes", "readwrite");
+  const current = await tx.store.get(id);
+  if (current) await tx.store.put({ ...current, ...patch });
+  await tx.done;
 }
 
 export async function getNote(id: string): Promise<StoredNote | undefined> {

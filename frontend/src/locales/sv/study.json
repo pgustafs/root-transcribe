@@ -16,7 +16,11 @@
     "modeLast15": "Bara de senaste 15 sekunderna",
     "modeUntilStoppedHelp": "Första tryckningen sparar bilden och de 15 sekunderna före. Nästa tryckning avslutar anteckningen.",
     "modeLast15Help": "Varje tryckning sparar bilden och de 15 sekunderna före.",
-    "notebookFailed": "Anteckningsboken kunde inte öppnas. Försök igen."
+    "notebookFailed": "Anteckningsboken kunde inte öppnas. Försök igen.",
+    "offerSlides": "Erbjud att spara en bild när den byts",
+    "offerSlidesHelp": "När en ny bild visas kan du i 20 sekunder fortfarande spara den förra som en anteckning, med det som sades före bytet.",
+    "enrich": "Förbättra anteckningar med AI",
+    "enrichHelp": "Lägger till en rubrik, en städad version av texten, nyckelbegrepp och texten på bilden. Bilden och texten i varje anteckning skickas till den här installationens språkmodell."
   },
   "crop": {
     "title": "Välj vad som ska sparas",
@@ -59,7 +63,8 @@
       "max_length": "Den öppna anteckningen avslutades efter 10 minuter.",
       "storage": "Anteckningen kunde inte sparas i den här webbläsaren.",
       "not_recording": "Ingen inspelning pågår.",
-      "source_changed": "Den öppna anteckningen avslutades eftersom källan byttes."
+      "source_changed": "Den öppna anteckningen avslutades eftersom källan byttes.",
+      "offer_gone": "Den bilden kan inte längre sparas."
     },
     "cancelAlsoNotes_one": "Den {{count}} anteckning som togs i den kastas också.",
     "cancelAlsoNotes_other": "De {{count}} anteckningar som togs i den kastas också."
@@ -74,6 +79,20 @@
     "intro": "Dela fliken med nästa video. Anteckningar hamnar från och med nu i dess anteckningsbok; inspelningen fortsätter.",
     "share": "Dela flik",
     "notShared": "Ingen flik delades. Den nuvarande källan är oförändrad."
+  },
+  "marks": {
+    "label": "Märk anteckningen",
+    "important": "Viktigt",
+    "unclear": "Förstår inte"
+  },
+  "thought": {
+    "label": "En tanke till anteckningen",
+    "placeholder": "Tanke · Enter sparar"
+  },
+  "offer": {
+    "keep": "Spara förra bilden",
+    "line": "Bilden byttes",
+    "announce": "Bilden byttes. Du kan spara den förra bilden som en anteckning."
   },
   "page": {
     "notebooks": "Anteckningsböcker",
@@ -129,6 +148,34 @@
     "thoughtsFailed": "Det gick inte att spara. Försök igen.",
     "actions": "Fler åtgärder för anteckningen vid {{time}}",
     "openImage": "Visa bild: {{alt}}",
-    "defaultNotebook": "Anteckningar"
+    "defaultNotebook": "Anteckningar",
+    "slideText": "Text på bilden",
+    "copy": "Kopiera",
+    "copied": "Kopierat",
+    "terms": "Nyckelbegrepp",
+    "explanation": "Enkelt förklarat",
+    "showOriginal": "Visa original",
+    "showTidy": "Visa städad text",
+    "contextMore": "Visa 30 sekunder till",
+    "contextHide": "Dölj",
+    "contextRange": "Från hela inspelningen, {{start}}–{{end}}",
+    "contextLabel": "Vad som sades runt anteckningen, {{start}}–{{end}}",
+    "contextEmpty": "Inget sades i den här delen.",
+    "contextReason": {
+      "not_linked": "Tillgängligt när inspelningen har laddats upp och transkriberats.",
+      "not_transcribed": "Inspelningen har inte transkriberats ännu."
+    },
+    "contextFailed": "Den omgivande texten kunde inte hämtas.",
+    "enrichAgain": "Förbättra med AI igen",
+    "enriching": "Förbättrar anteckningen …",
+    "enrichFailed": "Anteckningen kunde inte förbättras.",
+    "tabNotes": "Anteckningar",
+    "tabGlossary": "Ordlista ({{count}})",
+    "filter": "Visa anteckningar",
+    "filterAll": "Alla",
+    "search": "Sök i anteckningar",
+    "shown": "{{count}} av {{total}} anteckningar visas",
+    "noMatch": "Inga anteckningar matchar.",
+    "glossaryEmpty": "Inga nyckelbegrepp ännu. De läggs till när anteckningar förbättras med AI."
   }
 }

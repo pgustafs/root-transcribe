@@ -30,6 +30,27 @@ export type StudyNoteStatus =
   | "failed"
   | "screenshot_only";
 
+export type NoteTag = "important" | "unclear";
+export const NOTE_TAGS: NoteTag[] = ["important", "unclear"];
+export type NoteTerm = { term: string; definition: string };
+export type EnrichStatus =
+  "none" | "pending" | "processing" | "ready" | "failed";
+
+export type NoteContext = {
+  available: boolean;
+  reason: "not_linked" | "not_transcribed" | null;
+  start_ms: number;
+  end_ms: number;
+  at_start: boolean;
+  at_end: boolean;
+  segments: {
+    start_ms: number;
+    end_ms: number;
+    speaker: string | null;
+    text: string;
+  }[];
+};
+
 export type StudyNote = {
   id: string;
   notebook_id: string;
@@ -47,6 +68,17 @@ export type StudyNote = {
   error: string | null;
   /** The owner's own words, apart from the transcript. */
   comment: string | null;
+  tags: NoteTag[];
+  /** Written by the language model. */
+  title: string | null;
+  /** The transcript without fillers; `text` stays as it was said. */
+  clean_text: string | null;
+  /** What can be read in the image (Markdown). */
+  slide_text: string | null;
+  terms: NoteTerm[] | null;
+  explanation: string | null;
+  enrich_status: EnrichStatus;
+  enrich_error: string | null;
   end_reason: string | null;
   source_time_url: string | null;
   created_at: string;
@@ -129,6 +161,7 @@ export async function putSession(
     notebook_id: string;
     language: string;
     mode: string;
+    enrich?: boolean;
     started_at: string;
   },
 ): Promise<StudySession> {
@@ -165,6 +198,8 @@ export type NoteUpload = {
   audioStartMs: number | null;
   audioEndMs: number | null;
   endReason: string | null;
+  tags?: string[];
+  comment?: string | null;
 };
 
 /** Send one capture. Repeating it is safe: the id decides. */
@@ -190,6 +225,8 @@ export async function putNote(
     );
   }
   if (note.endReason) form.append("end_reason", note.endReason);
+  if (note.tags?.length) form.append("tags", note.tags.join(","));
+  if (note.comment?.trim()) form.append("comment", note.comment.trim());
   const { data } = await apiClient.put<StudyNote>(
     `${base(workspaceId)}/notes/${noteId}`,
     form,
@@ -216,6 +253,49 @@ export async function setNoteSourceTime(
   const { data } = await apiClient.patch<StudyNote>(
     `${base(workspaceId)}/notes/${noteId}`,
     { source_time_url: url },
+  );
+  return data;
+}
+
+export async function setNoteTags(
+  workspaceId: string,
+  noteId: string,
+  tags: NoteTag[],
+): Promise<StudyNote> {
+  const { data } = await apiClient.patch<StudyNote>(
+    `${base(workspaceId)}/notes/${noteId}`,
+    { tags },
+  );
+  return data;
+}
+
+export async function enrichNote(
+  workspaceId: string,
+  noteId: string,
+): Promise<StudyNote> {
+  const { data } = await apiClient.post<StudyNote>(
+    `${base(workspaceId)}/notes/${noteId}/enrich`,
+  );
+  return data;
+}
+
+export async function getNoteContext(
+  workspaceId: string,
+  noteId: string,
+  seconds: number,
+): Promise<NoteContext> {
+  const { data } = await apiClient.get<NoteContext>(
+    `${base(workspaceId)}/notes/${noteId}/context`,
+    { params: { seconds } },
+  );
+  return data;
+}
+
+export async function getFeatures(
+  workspaceId: string,
+): Promise<{ enrich: boolean }> {
+  const { data } = await apiClient.get<{ enrich: boolean }>(
+    `${base(workspaceId)}/features`,
   );
   return data;
 }

@@ -14,6 +14,7 @@ import {
   LinkIcon,
   Maximize2Icon,
   MoreVerticalIcon,
+  SparklesIcon,
   Trash2Icon,
 } from "lucide-react";
 import { useState } from "react";
@@ -21,11 +22,20 @@ import { useTranslation } from "react-i18next";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 
 import * as studyApi from "@/api/study";
-import type { StudyNote, StudySession } from "@/api/study";
+import { NOTE_TAGS } from "@/api/study";
+import type { NoteTag, StudyNote, StudySession } from "@/api/study";
 import { Alert } from "@/components/Alert";
 import { ConfirmDeleteModal } from "@/components/ConfirmDeleteModal";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
+import { SearchInput } from "@/components/SearchInput";
+import {
+  Glossary,
+  KeyTerms,
+  SlideText,
+  TagBadges,
+  WiderContext,
+} from "@/components/study/NoteParts";
 import { useRecordingContext } from "@/components/recording/RecordingProvider";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -46,9 +56,11 @@ import {
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
@@ -56,18 +68,24 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   useDeleteNote,
   useDeleteNotebook,
+  useEnrichNote,
   useNotebook,
   useNotebooks,
   useNoteImage,
   useRetryNote,
   useSetNoteComment,
   useSetNoteSourceTime,
+  useSetNoteTags,
+  useStudyFeatures,
 } from "@/hooks/useStudy";
 import { useWorkspace } from "@/hooks/useWorkspaces";
+import { buildGlossary, noteMatches } from "@/lib/study/noteText";
 import { downloadBlob } from "@/utils/downloadBlob";
 import { noteClock } from "@/utils/formatDuration";
 
@@ -307,12 +325,15 @@ function NoteEntry({
   notebookId,
   notebookTitle,
   canLinkSource,
+  canEnrich,
   note,
 }: {
   workspaceId: string;
   notebookId: string;
   notebookTitle: string;
   canLinkSource: boolean;
+  /** A language model is configured. */
+  canEnrich: boolean;
   note: StudyNote;
 }) {
   const { t } = useTranslation(["study", "common"]);
@@ -322,8 +343,21 @@ function NoteEntry({
   const [link, setLink] = useState("");
   const [linking, setLinking] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [original, setOriginal] = useState(false);
+  const setTags = useSetNoteTags(workspaceId, notebookId);
+  const enrich = useEnrichNote(workspaceId, notebookId);
   const at = noteClock(note.captured_ms);
   const working = note.status === "pending" || note.status === "processing";
+  const improving =
+    note.enrich_status === "pending" || note.enrich_status === "processing";
+  const tags = note.tags ?? [];
+  const toggleTag = (tag: NoteTag) =>
+    setTags.mutate({
+      noteId: note.id,
+      tags: tags.includes(tag)
+        ? tags.filter((item) => item !== tag)
+        : [...tags, tag],
+    });
   const hasText = note.status === "ready" && Boolean(note.text);
   const headingId = `note-${note.id}`;
   const linkId = `note-link-${note.id}`;
@@ -332,6 +366,7 @@ function NoteEntry({
     <li>
       <Card
         role="article"
+        id={`note-card-${note.id}`}
         aria-labelledby={headingId}
         className="glass-card gap-0 p-4 shadow-none sm:flex-row sm:gap-5"
       >
@@ -342,18 +377,20 @@ function NoteEntry({
         />
         <div className="mt-4 flex min-w-0 flex-1 flex-col gap-4 sm:mt-0">
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
+            <div className="flex min-w-0 flex-col gap-1">
               <h3 id={headingId} className="font-heading text-base font-medium">
-                {t("study:page.at", { time: at })}
+                {note.title ?? t("study:page.at", { time: at })}
               </h3>
-              {note.audio_start_ms !== null && note.audio_end_ms !== null && (
-                <p className="text-sm text-muted-foreground">
-                  {t("study:page.audio", {
+              <p className="text-sm text-muted-foreground">
+                {note.title && <>{t("study:page.at", { time: at })} · </>}
+                {note.audio_start_ms !== null &&
+                  note.audio_end_ms !== null &&
+                  t("study:page.audio", {
                     start: noteClock(note.audio_start_ms),
                     end: noteClock(note.audio_end_ms),
                   })}
-                </p>
-              )}
+              </p>
+              <TagBadges tags={tags} />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -367,6 +404,27 @@ function NoteEntry({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
+                  {NOTE_TAGS.map((tag) => (
+                    <DropdownMenuCheckboxItem
+                      key={tag}
+                      checked={tags.includes(tag)}
+                      onCheckedChange={() => toggleTag(tag)}
+                    >
+                      {t(`study:marks.${tag}`)}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  {canEnrich && (
+                    <DropdownMenuItem
+                      disabled={improving || working}
+                      onSelect={() => enrich.mutate(note.id)}
+                    >
+                      <SparklesIcon />
+                      {t("study:page.enrichAgain")}
+                    </DropdownMenuItem>
+                  )}
                   {canLinkSource && !note.source_time_url && (
                     <DropdownMenuItem onSelect={() => setLinking(true)}>
                       <LinkIcon />
@@ -383,10 +441,24 @@ function NoteEntry({
           </div>
 
           <div className="flex flex-col gap-2">
-            <h4 className="eyebrow px-0">{t("study:page.transcript")}</h4>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="eyebrow px-0">{t("study:page.transcript")}</h4>
+              {hasText && note.clean_text && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  aria-pressed={original}
+                  onClick={() => setOriginal((value) => !value)}
+                >
+                  {original
+                    ? t("study:page.showTidy")
+                    : t("study:page.showOriginal")}
+                </Button>
+              )}
+            </div>
             {hasText ? (
               <blockquote className="app-copy border-l-2 border-l-accent-line pl-3 whitespace-pre-wrap text-body">
-                {note.text}
+                {note.clean_text && !original ? note.clean_text : note.text}
               </blockquote>
             ) : (
               // The state is always words, never colour alone.
@@ -409,6 +481,9 @@ function NoteEntry({
                   </Button>
                 )}
               </p>
+            )}
+            {(hasText || note.status === "no_speech") && (
+              <WiderContext workspaceId={workspaceId} note={note} />
             )}
             {note.end_reason && (
               <p className="text-xs text-muted-foreground">
@@ -478,6 +553,37 @@ function NoteEntry({
             </form>
           )}
 
+          {improving && (
+            <p className="flex items-center gap-2 text-sm" role="status">
+              <Spinner aria-hidden="true" />
+              {t("study:page.enriching")}
+            </p>
+          )}
+          {note.enrich_status === "failed" && (
+            <p className="flex flex-wrap items-center gap-2 text-sm">
+              {t("study:page.enrichFailed")}
+              {canEnrich && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={enrich.isPending}
+                  onClick={() => enrich.mutate(note.id)}
+                >
+                  {t("study:page.retry")}
+                </Button>
+              )}
+            </p>
+          )}
+          {note.explanation && (
+            <div className="flex flex-col gap-2">
+              <h4 className="eyebrow px-0">{t("study:page.explanation")}</h4>
+              <p className="app-copy text-sm whitespace-pre-wrap text-body">
+                {note.explanation}
+              </p>
+            </div>
+          )}
+          <KeyTerms note={note} />
+          {note.slide_text && <SlideText text={note.slide_text} />}
           <Separator />
           <NoteThoughts
             workspaceId={workspaceId}
@@ -489,7 +595,7 @@ function NoteEntry({
       {confirming && (
         <ConfirmDeleteModal
           isOpen
-          itemName={t("study:page.at", { time: at })}
+          itemName={note.title ?? t("study:page.at", { time: at })}
           isDeleting={remove.isPending}
           onConfirm={() =>
             remove.mutate(note.id, { onSettled: () => setConfirming(false) })
@@ -520,7 +626,29 @@ function NotebookView({
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [query, setQuery] = useState("");
+  const [only, setOnly] = useState<"all" | NoteTag>("all");
+  const [view, setView] = useState("notes");
+  const features = useStudyFeatures(workspaceId);
   const data = notebook.data;
+  const allNotes = data?.notes ?? [];
+  const shown = allNotes.filter(
+    (note) =>
+      (only === "all" || (note.tags ?? []).includes(only)) &&
+      noteMatches(note, query),
+  );
+  const glossary = buildGlossary(allNotes, i18n.language);
+  const openNote = (note: StudyNote) => {
+    setQuery("");
+    setOnly("all");
+    setView("notes");
+    // After the list is back: bring the note into view and name it.
+    requestAnimationFrame(() => {
+      const card = document.getElementById(`note-card-${note.id}`);
+      card?.scrollIntoView({ block: "start" });
+      card?.querySelector<HTMLElement>("button")?.focus();
+    });
+  };
 
   const exportMarkdown = async () => {
     if (!data) return;
@@ -549,7 +677,7 @@ function NotebookView({
   // Group the (already ordered) notes under their session heading.
   const groups: { session: StudySession | undefined; notes: StudyNote[] }[] =
     [];
-  for (const note of data?.notes ?? []) {
+  for (const note of shown) {
     const last = groups[groups.length - 1];
     if (last && last.session?.id === note.session_id) last.notes.push(note);
     else groups.push({ session: sessions.get(note.session_id), notes: [note] });
@@ -631,31 +759,95 @@ function NotebookView({
           emptyIcon={BookOpenIcon}
           onRetry={() => void notebook.refetch()}
         >
-          <div className="mx-auto flex max-w-3xl flex-col gap-8">
-            {groups.map((group, index) => (
-              <section key={`${group.session?.id ?? "s"}-${index}`}>
-                <h2 className="eyebrow mb-3 px-0">
-                  {t("study:page.session", {
-                    date: group.session
-                      ? day.format(new Date(group.session.started_at))
-                      : "",
-                  })}
-                </h2>
-                <ol className="flex flex-col gap-3">
-                  {group.notes.map((note) => (
-                    <NoteEntry
-                      key={note.id}
-                      workspaceId={workspaceId}
-                      notebookId={notebookId}
-                      notebookTitle={data?.title ?? ""}
-                      canLinkSource={Boolean(data?.source_key)}
-                      note={note}
-                    />
-                  ))}
-                </ol>
-              </section>
-            ))}
-          </div>
+          <Tabs
+            value={view}
+            onValueChange={setView}
+            className="mx-auto flex max-w-3xl flex-col gap-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <TabsList>
+                <TabsTrigger value="notes">
+                  {t("study:page.tabNotes")}
+                </TabsTrigger>
+                <TabsTrigger value="glossary">
+                  {t("study:page.tabGlossary", { count: glossary.length })}
+                </TabsTrigger>
+              </TabsList>
+              {view === "notes" && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    aria-label={t("study:page.filter")}
+                    value={only}
+                    onValueChange={(value) => {
+                      if (value) setOnly(value as "all" | NoteTag);
+                    }}
+                  >
+                    <ToggleGroupItem value="all">
+                      {t("study:page.filterAll")}
+                    </ToggleGroupItem>
+                    {NOTE_TAGS.map((tag) => (
+                      <ToggleGroupItem key={tag} value={tag}>
+                        {t(`study:marks.${tag}`)}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                  <SearchInput
+                    className="w-56"
+                    aria-label={t("study:page.search")}
+                    placeholder={t("study:page.search")}
+                    value={query}
+                    onChange={(_event, value) => setQuery(value)}
+                    onClear={() => setQuery("")}
+                  />
+                </div>
+              )}
+            </div>
+            <TabsContent value="notes" className="flex flex-col gap-8">
+              <p className="sr-only" aria-live="polite">
+                {query || only !== "all"
+                  ? t("study:page.shown", {
+                      count: shown.length,
+                      total: allNotes.length,
+                    })
+                  : ""}
+              </p>
+              {shown.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {t("study:page.noMatch")}
+                </p>
+              )}
+              {groups.map((group, index) => (
+                <section key={`${group.session?.id ?? "s"}-${index}`}>
+                  <h2 className="eyebrow mb-3 px-0">
+                    {t("study:page.session", {
+                      date: group.session
+                        ? day.format(new Date(group.session.started_at))
+                        : "",
+                    })}
+                  </h2>
+                  <ol className="flex flex-col gap-3">
+                    {group.notes.map((note) => (
+                      <NoteEntry
+                        key={note.id}
+                        workspaceId={workspaceId}
+                        notebookId={notebookId}
+                        notebookTitle={data?.title ?? ""}
+                        canLinkSource={Boolean(data?.source_key)}
+                        canEnrich={Boolean(features.data?.enrich)}
+                        note={note}
+                      />
+                    ))}
+                  </ol>
+                </section>
+              ))}
+            </TabsContent>
+            <TabsContent value="glossary">
+              <Glossary entries={glossary} onOpenNote={openNote} />
+            </TabsContent>
+          </Tabs>
         </DataState>
       </section>
       {confirming && data && (

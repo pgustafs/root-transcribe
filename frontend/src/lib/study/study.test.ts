@@ -18,6 +18,7 @@ import {
   type StudyStatus,
 } from "@/lib/study/noteController";
 import * as store from "@/lib/study/noteStore";
+import { difference, SlideDetector } from "@/lib/study/slideWatch";
 import { sourceKey, isHttpUrl } from "@/lib/study/sourceKey";
 import { encodeWav, TabAudioBuffer } from "@/lib/study/tabAudio";
 
@@ -141,6 +142,11 @@ function fakeSource(buffer: TabAudioBuffer | null) {
   let lost: (() => void) | null = null;
   let live = true;
   let frames = 0;
+  // What the shared tab shows: every cell of the small grey picture has this
+  // value, so "a new slide" is simply another number.
+  let picture = 10;
+  let released = 0;
+  const encoded: number[] = [];
   const source: CaptureSource = {
     buffer,
     hasVideo: true,
@@ -148,10 +154,19 @@ function fakeSource(buffer: TabAudioBuffer | null) {
     grab: async () => {
       frames += 1;
       const taken = frames;
+      const shown = picture;
       return {
-        encode: async () => new Blob([`frame-${taken}`], { type: "image/png" }),
+        encode: async () => {
+          encoded.push(shown);
+          return new Blob([`frame-${taken}`], { type: "image/png" });
+        },
+        signature: () => new Uint8Array(576).fill(shown),
+        release: () => {
+          released += 1;
+        },
       };
     },
+    onTick: () => {},
     onLost: (listener) => {
       lost = listener;
     },
@@ -159,6 +174,11 @@ function fakeSource(buffer: TabAudioBuffer | null) {
   };
   return {
     source,
+    show: (value: number) => {
+      picture = value;
+    },
+    released: () => released,
+    encoded,
     lose: () => {
       live = false;
       lost?.();
@@ -192,9 +212,13 @@ function fakeApi() {
   };
 }
 
-async function setup(mode: store.StudyMode, withAudio = true) {
+async function setup(
+  mode: store.StudyMode,
+  withAudio = true,
+  offerSlides = false,
+) {
   const buffer = withAudio ? new TabAudioBuffer(RATE, 15, 5) : null;
-  const { source, lose } = fakeSource(buffer);
+  const { source, lose, show, released, encoded } = fakeSource(buffer);
   const backend = fakeApi();
   let clock = 0;
   let paused = false;
@@ -218,6 +242,7 @@ async function setup(mode: store.StudyMode, withAudio = true) {
       language: "sv",
       mode,
       localRecordingId: "local-1",
+      offerSlides,
     },
     {} as MediaStream,
   );
@@ -226,6 +251,9 @@ async function setup(mode: store.StudyMode, withAudio = true) {
     buffer,
     backend,
     lose,
+    show,
+    released,
+    encoded,
     setClock: (ms: number) => {
       clock = ms;
     },
@@ -392,5 +420,132 @@ describe("study note controller", () => {
     await discardStudySessions("local-1", again.backend.api);
     expect(again.backend.calls.some((c) => c.startsWith("delete:"))).toBe(true);
     expect(await countStudyNotes("local-1")).toBe(0);
+  });
+
+  it("carries a mark and a thought with the note", async () => {
+    const t = await setup("until_stopped");
+    t.buffer?.append(ramp(0, 300));
+    t.setClock(3_000);
+    // A mark with no note open takes a note that carries it.
+    await t.controller.mark("unclear", { thought: "Why not a full scan?" });
+    expect(t.status().openSinceMs).toBe(3_000);
+    expect(t.status().openTags).toEqual(["unclear"]);
+    // On the open note marks switch on and off, and the note stays open.
+    await t.controller.mark("important");
+    await t.controller.mark("unclear");
+    await t.controller.addThought("Compare the plans.");
+    expect(t.status().openTags).toEqual(["important"]);
+    expect(t.status().openSinceMs).toBe(3_000);
+    await t.controller.toggle({ thought: "Ask on Friday." });
+    await vi.waitFor(() => expect(t.backend.notes.size).toBe(1));
+    expect([...t.backend.notes.values()][0]).toMatchObject({
+      tags: ["important"],
+      comment: "Why not a full scan?\nCompare the plans.\nAsk on Friday.",
+    });
+
+    // "Last 15 seconds": every mark or thought is one complete note.
+    const quick = await setup("last_15s");
+    quick.buffer?.append(ramp(0, 100));
+    await quick.controller.mark("important");
+    await quick.controller.addThought("Remember this.");
+    await vi.waitFor(() => expect(quick.backend.notes.size).toBe(2));
+    const sent = [...quick.backend.notes.values()] as {
+      tags: string[];
+      comment: string | null;
+    }[];
+    expect(sent.map((note) => note.tags)).toEqual([["important"], []]);
+    expect(sent.map((note) => note.comment)).toEqual([null, "Remember this."]);
+  });
+
+  it("offers the slide that went away, with the talk before the change", async () => {
+    const t = await setup("last_15s", true, true);
+    // Slide A is showing while 12 seconds are spoken.
+    t.buffer?.append(ramp(0, 1200));
+    t.setClock(12_000);
+    await t.controller.sample();
+    await t.controller.sample();
+    expect(t.status().offer).toBeNull();
+    // Slide B replaces it. The first look sees the change, the second sees
+    // that the new picture is still.
+    t.show(200);
+    t.setClock(14_000);
+    await t.controller.sample();
+    expect(t.status().offer).toBeNull();
+    t.buffer?.append(ramp(5000, 200)); // talk about B, not part of A's note
+    t.setClock(16_000);
+    await t.controller.sample();
+    expect(t.status().offer).toMatchObject({ capturedMs: 12_000 });
+
+    const kept = await t.controller.keepOffer({ thought: "Good summary." });
+    // The audio ends where slide A stopped showing, not where it was kept.
+    expect(kept).toMatchObject({
+      outcome: "saved",
+      captured_ms: 12_000,
+      audio_start_ms: 2_000,
+      audio_end_ms: 14_000,
+    });
+    expect(t.status().offer).toBeNull();
+    await vi.waitFor(() => expect(t.backend.notes.size).toBe(1));
+    const sent = [...t.backend.notes.values()][0] as { comment: string };
+    expect(sent.comment).toBe("Good summary.");
+    // The image is slide A (picture 10), not what shows now (200).
+    expect(t.encoded).toEqual([10]);
+    expect((await t.controller.keepOffer()).reason).toBe("offer_gone");
+  });
+
+  it("makes no offer for moving video or while paused", async () => {
+    const t = await setup("last_15s", true, true);
+    // Every look shows something else: video, not slides.
+    for (const value of [10, 90, 170, 250, 40, 120]) {
+      t.show(value);
+      await t.controller.sample();
+    }
+    expect(t.status().offer).toBeNull();
+    // A slide, a pause, another slide afterwards: nothing to offer, because
+    // nobody saw the change happen.
+    t.show(10);
+    await t.controller.sample();
+    await t.controller.sample();
+    await t.controller.pause();
+    await t.controller.resume();
+    t.show(200);
+    await t.controller.sample();
+    await t.controller.sample();
+    expect(t.status().offer).toBeNull();
+    // Frames that were looked at and not kept are let go.
+    expect(t.released()).toBeGreaterThan(5);
+  });
+});
+
+describe("slide detector", () => {
+  const picture = (value: number, patch = 0) => {
+    const cells = new Uint8Array(576).fill(value);
+    cells.fill(255 - value, 0, patch);
+    return cells;
+  };
+
+  it("compares pictures by the share of cells that differ", () => {
+    expect(difference(picture(10), picture(10))).toBe(0);
+    expect(difference(picture(10), picture(20))).toBe(0); // small flicker
+    expect(difference(picture(10), picture(200))).toBe(1);
+    expect(difference(picture(10), picture(10, 144))).toBe(0.25);
+  });
+
+  it("ignores a slide that builds up bullet by bullet", () => {
+    const detector = new SlideDetector();
+    detector.feed(picture(10));
+    expect(detector.feed(picture(10))).toEqual({ verdict: "same", hold: true });
+    // A few new lines each time: the same slide, held again in its new state.
+    for (const patch of [20, 20, 40, 40, 60, 60])
+      expect(detector.feed(picture(10, patch)).verdict).toBe("same");
+    // A different picture: first seen leaving, then still.
+    expect(detector.feed(picture(200))).toEqual({
+      verdict: "leaving",
+      hold: false,
+    });
+    expect(detector.feed(picture(200))).toEqual({
+      verdict: "changed",
+      hold: true,
+    });
   });
 });

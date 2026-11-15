@@ -1,7 +1,9 @@
-import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button } from "@/components/ui/button";
+import {
+  type NoteCaptureActions,
+  NoteCaptureControls,
+} from "@/components/study/NoteCaptureControls";
 import type { StudyStatus } from "@/lib/study/noteController";
 import { formatMsClock } from "@/utils/formatDuration";
 
@@ -11,29 +13,23 @@ type Props = {
   recording: boolean;
   paused: boolean;
   durationMs: number;
-  onToggle: () => void;
+  actions: NoteCaptureActions;
 };
 
 /**
- * The content of the floating window: Take note / Stop note, and one line
- * that says what is going on. Nothing else, so it stays small above a video.
+ * The content of the floating window: the capture controls and one line that
+ * says what is going on. Nothing else, so it stays small above a video.
  */
 export function FloatingNotePanel({
   status,
   recording,
   paused,
   durationMs,
-  onToggle,
+  actions,
 }: Props) {
   const { t } = useTranslation("study");
-  const button = useRef<HTMLButtonElement>(null);
   const noteOpen = status.openSinceMs !== null;
   const canCapture = status.videoAvailable && recording;
-
-  // Space or Enter works as soon as the window has the focus.
-  useEffect(() => {
-    button.current?.focus();
-  }, []);
 
   let line: string;
   if (noteOpen)
@@ -43,6 +39,7 @@ export function FloatingNotePanel({
   else if (!status.videoAvailable) line = t("float.videoLost");
   else if (paused) line = t("dock.pausedHint");
   else if (!recording) line = t("float.notRecording");
+  else if (status.offer) line = t("offer.line");
   else if (status.notice && status.notice !== "paused")
     line = t(`dock.notice.${status.notice}`, { defaultValue: status.notice });
   else if (!status.audioAvailable) line = t("dock.screenshotOnly");
@@ -57,17 +54,14 @@ export function FloatingNotePanel({
       className="flex min-h-dvh flex-col justify-center gap-2 bg-background p-3 text-foreground"
       data-testid="study-float"
     >
-      <Button
-        ref={button}
-        onClick={onToggle}
-        disabled={!noteOpen && !canCapture}
-        variant="default"
-        size="lg"
-        className="w-full"
-        aria-describedby="study-float-state"
-      >
-        {noteOpen ? t("dock.stopNote") : t("dock.takeNote")}
-      </Button>
+      <NoteCaptureControls
+        status={status}
+        canCapture={canCapture}
+        actions={actions}
+        variant="floating"
+        describedBy="study-float-state"
+        focusOnMount
+      />
       {/* Not a live region: the timer ticks every second. */}
       <p
         id="study-float-state"

@@ -8,6 +8,10 @@ import { useTranslation } from "react-i18next";
 
 import { Alert } from "@/components/Alert";
 import type { UploadProgress } from "@/lib/uploadManager";
+import {
+  type NoteCaptureActions,
+  NoteCaptureControls,
+} from "@/components/study/NoteCaptureControls";
 import type { StudyStatus } from "@/lib/study/noteController";
 import {
   formatDuration as formatSeconds,
@@ -17,7 +21,7 @@ import {
 /** Study notes of the running recording, and what the dock can do with them. */
 export type StudyDockProps = {
   status: StudyStatus;
-  onToggle: () => void;
+  actions: NoteCaptureActions;
   onViewNotes: () => void;
   onChangeSource: () => void;
   /** The floating Take note window; absent where the browser has none. */
@@ -186,15 +190,13 @@ export function RecordingDock({
           className="flex flex-wrap items-center gap-x-3 gap-y-2"
           data-testid="study-dock"
         >
-          <Button
-            onClick={study.onToggle}
-            disabled={!noteOpen && !canCapture}
-            variant="default"
-            size="sm"
-            aria-describedby="study-dock-state"
-          >
-            {noteOpen ? t("study:dock.stopNote") : t("study:dock.takeNote")}
-          </Button>
+          <NoteCaptureControls
+            status={notes}
+            canCapture={canCapture}
+            actions={study.actions}
+            variant="dock"
+            describedBy="study-dock-state"
+          />
           {/* Not a live region: the timer ticks every second. Start and save
               are announced once in the region below. */}
           <span id="study-dock-state" className="text-sm text-muted-foreground">

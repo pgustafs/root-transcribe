@@ -16,6 +16,7 @@ Url = Annotated[
 ]
 StudyLanguage = Literal["auto", "en", "sv"]
 StudyMode = Literal["until_stopped", "last_15s"]
+NoteTag = Literal["important", "unclear"]
 
 
 class NotebookCreate(BaseModel):
@@ -45,6 +46,8 @@ class SessionCreate(BaseModel):
     notebook_id: uuid.UUID
     language: StudyLanguage = "auto"
     mode: StudyMode = "until_stopped"
+    # Let the language model work on the notes (when one is configured).
+    enrich: bool = True
     started_at: datetime | None = None
 
 
@@ -60,6 +63,7 @@ class SessionPublic(BaseModel):
     recording_id: uuid.UUID | None
     language: str
     mode: str
+    enrich: bool = True
     started_at: datetime
 
 
@@ -81,6 +85,14 @@ class NotePublic(BaseModel):
     text: str | None
     error: str | None
     comment: str | None
+    tags: list[str] = Field(default_factory=list)
+    title: str | None = None
+    clean_text: str | None = None
+    slide_text: str | None = None
+    terms: list[dict[str, str]] | None = None
+    explanation: str | None = None
+    enrich_status: str = "none"
+    enrich_error: str | None = None
     end_reason: str | None
     source_time_url: str | None
     created_at: datetime
@@ -95,8 +107,36 @@ class NoteUpdate(BaseModel):
     ) = None
     # The owner's own words. Empty string removes them.
     comment: Annotated[str, StringConstraints(max_length=10000)] | None = None
+    # The whole set of marks on the note.
+    tags: list[NoteTag] | None = None
 
 
 class NotebookDetail(NotebookPublic):
     sessions: list[SessionPublic] = Field(default_factory=list)
     notes: list[NotePublic] = Field(default_factory=list)
+
+
+class ContextSegment(BaseModel):
+    start_ms: int
+    end_ms: int
+    speaker: str | None = None
+    text: str
+
+
+class NoteContext(BaseModel):
+    """What was said around a note, from the full recording's transcript."""
+
+    available: bool
+    # not_linked | not_transcribed | no_access
+    reason: str | None = None
+    start_ms: int = 0
+    end_ms: int = 0
+    # Nothing more exists before / after this range.
+    at_start: bool = False
+    at_end: bool = False
+    segments: list[ContextSegment] = Field(default_factory=list)
+
+
+class StudyFeatures(BaseModel):
+    # A language model is configured: notes can be worked on.
+    enrich: bool

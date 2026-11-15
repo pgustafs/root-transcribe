@@ -50,7 +50,11 @@ export function useNotebook(
     refetchInterval: (query) => {
       const data = query.state.data as StudyNotebookDetail | undefined;
       const working = data?.notes.some(
-        (note) => note.status === "pending" || note.status === "processing",
+        (note) =>
+          note.status === "pending" ||
+          note.status === "processing" ||
+          note.enrich_status === "pending" ||
+          note.enrich_status === "processing",
       );
       return working || live ? 2000 : false;
     },
@@ -82,6 +86,53 @@ export function useNoteImage(
     return () => URL.revokeObjectURL(next);
   }, [query.data]);
   return { url, failed: query.isError };
+}
+
+/** What this installation can do with notes. */
+export function useStudyFeatures(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["study", workspaceId, "features"] as const,
+    queryFn: () => studyApi.getFeatures(workspaceId),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function useNoteMutation<Input>(
+  workspaceId: string,
+  notebookId: string,
+  run: (input: Input) => Promise<studyApi.StudyNote>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: run,
+    onSuccess: (saved) =>
+      qc.setQueryData<StudyNotebookDetail>(
+        studyKeys.notebook(workspaceId, notebookId),
+        (current) =>
+          current && {
+            ...current,
+            notes: current.notes.map((note) =>
+              note.id === saved.id ? saved : note,
+            ),
+          },
+      ),
+  });
+}
+
+export function useSetNoteTags(workspaceId: string, notebookId: string) {
+  return useNoteMutation(
+    workspaceId,
+    notebookId,
+    (input: { noteId: string; tags: studyApi.NoteTag[] }) =>
+      studyApi.setNoteTags(workspaceId, input.noteId, input.tags),
+  );
+}
+
+export function useEnrichNote(workspaceId: string, notebookId: string) {
+  return useNoteMutation(workspaceId, notebookId, (noteId: string) =>
+    studyApi.enrichNote(workspaceId, noteId),
+  );
 }
 
 export function useRetryNote(workspaceId: string, notebookId: string) {

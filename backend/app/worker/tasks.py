@@ -2828,6 +2828,14 @@ def identify_speaker_names(run_id: str) -> dict[str, str]:
             raise
 
 
+def _nudge_outbox() -> None:
+    """Ask for the outbox to be sent now instead of at the next beat."""
+    try:
+        dispatch_task_outbox.delay()
+    except Exception:  # noqa: BLE001 - the beat sends it within 30 seconds
+        logger.debug("could not nudge the outbox dispatcher", exc_info=True)
+
+
 @celery_app.task(
     name="tasks.transcribe_study_note", soft_time_limit=900, time_limit=960
 )
@@ -2859,6 +2867,11 @@ def transcribe_study_note(note_id: str) -> dict[str, str]:
             study_crud.complete_sync(
                 session, note_id=nid, text=(result.text or "").strip()
             )
+            if study_crud.enrich_wanted(study_session):
+                # Durable follow-up: title, tidy text, terms, slide text.
+                study_crud.queue_enrich_sync(session, note)
+                session.commit()
+                _nudge_outbox()
             obj = audio_object_crud.get_by_key_sync(session, note.audio_key)
             if obj is not None:
                 audio_object_crud.request_delete_sync(
@@ -2872,4 +2885,79 @@ def transcribe_study_note(note_id: str) -> dict[str, str]:
             study_crud.fail_sync(
                 session, note_id=nid, error=f"{type(exc).__name__}: {exc}"
             )
+            raise
+
+
+@celery_app.task(name="tasks.enrich_study_note", soft_time_limit=900, time_limit=960)
+def enrich_study_note(note_id: str) -> dict[str, str]:
+    """Let the language model work on one note.
+
+    Two independent questions: what can be read in the image, and (from the
+    words) a title, the tidy transcript, key terms and, for a note marked
+    "unclear", a plain explanation. Each answer is checked before it is
+    stored; a part that fails leaves the others in place. The transcript
+    itself (``text``) is never changed.
+    """
+    from app.crud import study as study_crud
+    from app.models.study import StudyNote
+    from app.services import study_enrich
+    from app.services.agent_runner import AgentRunError, get_agent_runner
+    from app.services.audio_store import get_audio_store
+
+    nid = uuid.UUID(note_id)
+    with session_scope() as session:
+        if not study_crud.claim_enrich_sync(session, note_id=nid):
+            return {"status": "skipped", "reason": "not_pending"}
+        note = session.get(StudyNote, nid)
+        runner = get_agent_runner()
+        problems: list[str] = []
+        done = 0
+        try:
+            # 1. The image. A model that cannot read images says so; the note
+            # then simply has no slide text.
+            if note.image_key and not note.slide_text:
+                try:
+                    image = get_audio_store().get_sync(note.image_key)
+                    if len(image) > study_enrich.MAX_IMAGE_BYTES:
+                        raise AgentRunError("The image is too large to be read.")
+                    answer = runner.chat_sync(
+                        instructions=study_enrich.SLIDE_INSTRUCTIONS, image=image
+                    )
+                    note.slide_text = study_enrich.parse_slide(answer.text)
+                    done += 1
+                except AgentRunError as exc:
+                    problems.append(f"Slide: {exc}")
+            # 2. The words.
+            unclear = "unclear" in (note.tags or [])
+            if (note.text or "").strip() or (note.slide_text or "").strip():
+                try:
+                    answer = runner.chat_sync(
+                        instructions=study_enrich.NOTE_INSTRUCTIONS,
+                        text=study_enrich.build_input(
+                            text=note.text, slide_text=note.slide_text, unclear=unclear
+                        ),
+                    )
+                    parsed = study_enrich.parse_note(
+                        answer.text, text=note.text, unclear=unclear
+                    )
+                    note.title = parsed.title or note.title
+                    note.clean_text = parsed.clean_text
+                    note.terms = parsed.terms or None
+                    note.explanation = parsed.explanation or note.explanation
+                    done += 1
+                except (AgentRunError, ValueError) as exc:
+                    problems.append(f"Text: {exc}")
+            failed = bool(problems) and done == 0
+            note.enrich_status = "failed" if failed else "ready"
+            note.enrich_error = " ".join(problems)[:2000] or None
+            session.commit()
+            return {"status": note.enrich_status}
+        except Exception as exc:
+            logger.exception("enrich_study_note: note %s failed", note_id)
+            session.rollback()
+            note = session.get(StudyNote, nid)
+            if note is not None:
+                note.enrich_status = "failed"
+                note.enrich_error = f"{type(exc).__name__}: {exc}"[:2000]
+                session.commit()
             raise

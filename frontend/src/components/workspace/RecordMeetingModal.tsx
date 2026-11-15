@@ -40,7 +40,7 @@ import {
   type StudyChoice,
 } from "@/lib/study/studyChoice";
 import { Switch } from "@/components/ui/switch";
-import { useNotebooks } from "@/hooks/useStudy";
+import { useNotebooks, useStudyFeatures } from "@/hooks/useStudy";
 
 /** How long the readiness probe may take before we stop waiting on it. The
  * probe is an optimisation — the upload path is still gated server-side and
@@ -105,6 +105,10 @@ export function RecordMeetingModal({
   const [cropping, setCropping] = useState(false);
   const takeStudyNotes = canStudy && includeTab && studyOn;
   const notebooks = useNotebooks(workspaceId, isOpen && canStudy && includeTab);
+  const features = useStudyFeatures(
+    workspaceId,
+    isOpen && canStudy && includeTab,
+  );
   const studyBlocked = takeStudyNotes && sourceUrlProblem(studyChoice);
 
   useEffect(() => {
@@ -158,6 +162,8 @@ export function RecordMeetingModal({
             notebookId: notebook.id,
             notebookTitle: notebook.title,
             mode: studyChoice.mode,
+            enrich: studyChoice.enrich && Boolean(features.data?.enrich),
+            offerSlides: studyChoice.offerSlides,
           };
         } catch {
           setStudyProblem(true);
@@ -320,6 +326,46 @@ export function RecordMeetingModal({
                   notebooks={notebooks.data ?? []}
                   suggestedTitle={title.trim() || t("recordModal.title")}
                 />
+              )}
+              {takeStudyNotes && (
+                <Field>
+                  <Field orientation="horizontal">
+                    <Switch
+                      id="study-offer-slides"
+                      checked={studyChoice.offerSlides}
+                      onCheckedChange={(offerSlides) =>
+                        setStudyChoice({ ...studyChoice, offerSlides })
+                      }
+                      aria-describedby="study-offer-slides-help"
+                    />
+                    <FieldLabel htmlFor="study-offer-slides">
+                      {t("study:setup.offerSlides")}
+                    </FieldLabel>
+                  </Field>
+                  <FieldDescription id="study-offer-slides-help">
+                    {t("study:setup.offerSlidesHelp")}
+                  </FieldDescription>
+                </Field>
+              )}
+              {takeStudyNotes && features.data?.enrich && (
+                <Field>
+                  <Field orientation="horizontal">
+                    <Switch
+                      id="study-enrich"
+                      checked={studyChoice.enrich}
+                      onCheckedChange={(enrich) =>
+                        setStudyChoice({ ...studyChoice, enrich })
+                      }
+                      aria-describedby="study-enrich-help"
+                    />
+                    <FieldLabel htmlFor="study-enrich">
+                      {t("study:setup.enrich")}
+                    </FieldLabel>
+                  </Field>
+                  <FieldDescription id="study-enrich-help">
+                    {t("study:setup.enrichHelp")}
+                  </FieldDescription>
+                </Field>
               )}
               {studyProblem && (
                 <Alert

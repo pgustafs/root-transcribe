@@ -11,6 +11,7 @@ owner; needs the ``study_notes`` capability.
 from __future__ import annotations
 
 import contextlib
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -43,19 +44,22 @@ from app.crud import meeting_governance as meeting_governance_crud
 from app.crud import meeting_recording as meeting_recording_crud
 from app.crud import study as study_crud
 from app.crud import task_outbox as task_outbox_crud
+from app.crud import transcript_revision as transcript_revision_crud
 from app.db.session import SessionDep
-from app.models.study import StudyNote, StudyNotebook, StudySession
+from app.models.study import NOTE_TAGS, StudyNote, StudyNotebook, StudySession
 from app.models.user import User
 from app.schemas.study import (
     NotebookCreate,
     NotebookDetail,
     NotebookPublic,
     NotebookUpdate,
+    NoteContext,
     NotePublic,
     NoteUpdate,
     SessionCreate,
     SessionPublic,
     SessionUpdate,
+    StudyFeatures,
 )
 from app.services import study_export, study_source
 from app.services.audio_store import get_audio_store, key_namespace
@@ -130,6 +134,15 @@ def _source(url: str | None) -> tuple[str | None, str | None]:
     if not study_source.is_http_url(url):
         raise AppError("The source must be a web link", status_code=422)
     return study_source.normalized(url), study_source.source_key(url)
+
+
+@router.get(f"{_WS}/features", dependencies=_ENABLED)
+async def features(
+    workspace_id: uuid.UUID, session: SessionDep, user: CurrentUserDep
+) -> StudyFeatures:
+    """What this installation can do with notes."""
+    await _guard(session, user, workspace_id)
+    return StudyFeatures(enrich=bool(settings.LLM_BASE_URL.strip()))
 
 
 # --- notebooks ----------------------------------------------------------------
@@ -300,8 +313,16 @@ async def export_notebook(
                 audio_start_ms=note.audio_start_ms,
                 audio_end_ms=note.audio_end_ms,
                 status=note.status,
-                text=note.text,
+                text=note.clean_text or note.text,
                 comment=note.comment,
+                title=note.title,
+                tags=tuple(note.tags or ()),
+                slide_text=note.slide_text,
+                terms=tuple(
+                    (t.get("term", ""), t.get("definition", ""))
+                    for t in (note.terms or [])
+                ),
+                explanation=note.explanation,
                 image=None,
                 source_time_url=note.source_time_url,
             ),
@@ -367,6 +388,7 @@ async def put_session(
         notebook_id=notebook.id,
         language=payload.language,
         mode=payload.mode,
+        enrich=payload.enrich,
         started_at=payload.started_at or datetime.now(UTC),
     )
     session.add(row)
@@ -442,6 +464,23 @@ async def _queue_transcription(session: SessionDep, note: StudyNote, user: User)
     )
 
 
+def _speaker_label(label: str) -> str:
+    """SPEAKER_00 -> "Speaker 1", as the transcript view shows it."""
+    match = re.fullmatch(r"SPEAKER_(\d+)", label or "", flags=re.IGNORECASE)
+    return f"Speaker {int(match.group(1)) + 1}" if match else (label or "")
+
+
+def _headers(user: User) -> dict:
+    return {"request_id": request_id_ctx.get(), "user": user.email}
+
+
+def _tags(value: str | list[str] | None) -> list[str]:
+    """The known marks in a fixed order; anything else is ignored."""
+    given = value.split(",") if isinstance(value, str) else (value or [])
+    wanted = {item.strip() for item in given}
+    return [tag for tag in NOTE_TAGS if tag in wanted]
+
+
 async def _read_limited(upload: UploadFile, limit: int, what: str) -> bytes:
     data = await upload.read(limit + 1)
     if len(data) > limit:
@@ -475,6 +514,8 @@ async def put_note(
     audio_start_ms: Annotated[int | None, Form(ge=0)] = None,
     audio_end_ms: Annotated[int | None, Form(ge=0)] = None,
     end_reason: Annotated[str | None, Form(max_length=30)] = None,
+    tags: Annotated[str | None, Form(max_length=100)] = None,
+    comment: Annotated[str | None, Form(max_length=10000)] = None,
 ) -> NotePublic:
     """Store one capture. The id comes from the browser, so sending the same
     note again changes nothing and returns what is stored."""
@@ -543,11 +584,17 @@ async def put_note(
         status="pending" if audio_bytes is not None else "screenshot_only",
         end_reason=end_reason,
         send_count=0,
+        tags=_tags(tags),
+        comment=(comment or "").strip() or None,
     )
     session.add(note)
     outbox = None
     if audio_bytes is not None:
+        # The model work follows the transcription (see the worker task).
         outbox = await _queue_transcription(session, note, user)
+    elif study_crud.enrich_wanted(study_session):
+        # No speech to wait for: the image can be read at once.
+        outbox = await study_crud.queue_enrich(session, note, headers=_headers(user))
     await study_crud.touch_notebook(session, notebook_id)
     await session.commit()
     if outbox is not None:
@@ -592,6 +639,24 @@ async def update_note(
     note, notebook = await _note(session, user, workspace_id, note_id)
     if payload.comment is not None:
         note.comment = payload.comment.strip() or None
+    outbox = None
+    if payload.tags is not None:
+        before = set(note.tags or [])
+        note.tags = _tags(list(payload.tags))
+        # Newly marked "did not understand": ask for the plain explanation.
+        if (
+            "unclear" in note.tags
+            and "unclear" not in before
+            and not note.explanation
+            and note.enrich_status in ("none", "ready", "failed")
+            and note.status not in ("pending", "processing")
+            and study_crud.enrich_wanted(
+                await study_crud.get_session(session, note.session_id)
+            )
+        ):
+            outbox = await study_crud.queue_enrich(
+                session, note, headers=_headers(user)
+            )
     url = payload.source_time_url
     if url is None:
         pass
@@ -608,8 +673,93 @@ async def update_note(
             )
         note.source_time_url = study_source.normalized(url)
     await session.commit()
+    if outbox is not None:
+        await try_dispatch(session, outbox)
     await session.refresh(note)
     return _note_public(note)
+
+
+@router.post(f"{_WS}/notes/{{note_id}}/enrich", dependencies=_ENABLED)
+async def enrich_note(
+    workspace_id: uuid.UUID,
+    note_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> NotePublic:
+    """Have the language model work on a note (again): title, tidy text, key
+    terms, text on the slide."""
+    await _guard(session, user, workspace_id)
+    note, _owner_notebook = await _note(session, user, workspace_id, note_id)
+    if not settings.LLM_BASE_URL.strip():
+        raise ConflictError("No language model is configured for this installation")
+    if note.enrich_status in ("pending", "processing") or note.status in (
+        "pending",
+        "processing",
+    ):
+        return _note_public(note)
+    outbox = await study_crud.queue_enrich(session, note, headers=_headers(user))
+    await session.commit()
+    if outbox is not None:
+        await try_dispatch(session, outbox)
+    await session.refresh(note)
+    return _note_public(note)
+
+
+@router.get(f"{_WS}/notes/{{note_id}}/context", dependencies=_ENABLED)
+async def note_context(
+    workspace_id: uuid.UUID,
+    note_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUserDep,
+    seconds: Annotated[int, Query(ge=0, le=600)] = 30,
+) -> NoteContext:
+    """What was said up to ``seconds`` before and after a note, taken from the
+    transcript of the full recording the note was made in."""
+    await _guard(session, user, workspace_id)
+    note, _owner_notebook = await _note(session, user, workspace_id, note_id)
+    study_session = await study_crud.get_session(session, note.session_id)
+    recording_id = study_session.recording_id if study_session else None
+    if recording_id is None:
+        return NoteContext(available=False, reason="not_linked")
+    rec = await meeting_recording_crud.get_for_workspace(
+        session, workspace_id=workspace_id, recording_id=recording_id
+    )
+    if rec is None:
+        return NoteContext(available=False, reason="not_linked")
+    # The same rule as reading the recording's transcript itself.
+    await _require_cap(session, user, workspace_id, MeetingCapability.VIEW_TRANSCRIPT)
+    segments = await meeting_recording_crud.list_segments(
+        session,
+        recording_id=rec.id,
+        revision_id=transcript_revision_crud.display_revision_id(rec),
+    )
+    if not segments:
+        return NoteContext(available=False, reason="not_transcribed")
+    first = note.audio_start_ms if note.audio_start_ms is not None else note.captured_ms
+    last = note.audio_end_ms if note.audio_end_ms is not None else note.captured_ms
+    start_ms = max(0, first - seconds * 1000)
+    end_ms = last + seconds * 1000
+    inside = [s for s in segments if s.end_ms > start_ms and s.start_ms < end_ms]
+    names = await meeting_recording_crud.names_for_profiles(
+        session, [s.speaker_profile_id for s in inside if s.speaker_profile_id]
+    )
+    return NoteContext(
+        available=True,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        at_start=start_ms <= segments[0].start_ms,
+        at_end=end_ms >= segments[-1].end_ms,
+        segments=[
+            {
+                "start_ms": s.start_ms,
+                "end_ms": s.end_ms,
+                "speaker": meeting_recording_crud.shown_speaker(s, names)
+                or _speaker_label(s.speaker_label),
+                "text": s.text,
+            }
+            for s in inside
+        ],
+    )
 
 
 @router.delete(

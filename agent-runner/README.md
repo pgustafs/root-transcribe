@@ -7,6 +7,10 @@ returns the answer. It is a separate container so that CUGA's dependencies
 (about 2 GB) and model-written code stay away from the database and storage
 credentials.
 
+`POST /chat` is one plain model call without the agent, optionally about an
+image (base64). Notebooks use it for short structured answers and for reading
+the text on a slide; the latter needs a model that accepts images.
+
 Configuration (environment): `LLM_BASE_URL` (OpenAI-compatible, ending in
 `/v1`), `LLM_MODEL`, optional `LLM_API_KEY`.
 

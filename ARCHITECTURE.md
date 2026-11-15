@@ -144,6 +144,26 @@ transcript of a short piece of the tab's audio.
   and then requests deletion of the excerpt; a failed note keeps it for Retry
   (swept after 7 days). Deleting the recording, the notebook or the workspace
   tombstones the media.
+- **Marks, thoughts, slide offers (browser).** A press can carry a mark
+  (`important`, `unclear`) and a typed thought; both travel with the note
+  upload (`tags`, `comment`). `lib/study/slideWatch.ts` reduces a frame to a
+  32 × 18 grey picture every two seconds (clocked by the audio worklet's
+  blocks, which are not slowed down in a background tab). A still picture
+  replaced by another still picture is a slide change; the controller then
+  holds the previous frame and the look-back audio for 20 seconds as an offer.
+- **Model work on a note.** `tasks.enrich_study_note` (default queue) runs
+  after the note's transcription, or at once for a screenshot. It asks the
+  agent runner's `POST /chat` (one plain model call, optionally with the
+  image) two questions: what can be read in the image, and a JSON answer with
+  title, tidy transcript, key terms and, for `unclear`, an explanation.
+  `services/study_enrich.py` checks every field; a tidy transcript whose word
+  count is under 55 % or over 115 % of the original is dropped. Results are
+  columns on `study_note` (`title`, `clean_text`, `slide_text`, `terms`,
+  `explanation`, `enrich_status`); `text` is never changed. Off when
+  `LLM_BASE_URL` is empty or the session was started with `enrich=false`.
+- **Wider context.** `GET …/study/notes/{id}/context?seconds=N` returns the
+  segments of the linked recording's display revision around the note; it
+  needs the `view_transcript` capability.
 - **Own words.** `study_note.comment` holds what the owner writes on a note
   (`PATCH …/study/notes/{id}`); it is never mixed with `text`, the transcript.
 - **Access.** Capability `study_notes` (editor and above). Notebooks are
@@ -381,7 +401,8 @@ Browser IndexedDB contains local recovery copies, independently of server storag
 Alembic migrations are explicit and ordered. `0001_transcription` initializes
 an empty application database; `0002_recording_language` and
 `0003_meeting_notes`, `0004_speaker_names`, `0005_study_notes`,
-`0006_drop_hotkey_credential` and `0007_study_note_comment` upgrade it (`0003` also inserts
+`0006_drop_hotkey_credential`, `0007_study_note_comment` and
+`0008_study_note_enrichment` upgrade it (`0003` also inserts
 the built-in note agents). Run
 `alembic upgrade head` for both new installations and upgrades. Do not edit an
 applied migration or change version markers to bypass an upgrade. Schema parity

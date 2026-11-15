@@ -23,6 +23,8 @@ STATUS_TEXT = {
     "screenshot_only": "Screenshot only. Tab audio was unavailable.",
 }
 
+TAG_TEXT = {"important": "Important", "unclear": "Did not understand"}
+
 _MONTHS = (
     "January",
     "February",
@@ -52,6 +54,12 @@ class ExportNote:
     image: bytes | None
     source_time_url: str | None = None
     comment: str | None = None
+    title: str | None = None
+    tags: tuple[str, ...] = ()
+    slide_text: str | None = None
+    #: (term, definition) pairs
+    terms: tuple[tuple[str, str], ...] = ()
+    explanation: str | None = None
 
 
 def clock(ms: int) -> str:
@@ -88,13 +96,20 @@ def build_markdown(
     if source_url:
         lines += [f"Source: {source_url}", ""]
     images: list[tuple[str, bytes]] = []
+    glossary: dict[str, tuple[str, str]] = {}
     current_session: str | None = None
     for number, note in enumerate(ordered(notes), start=1):
         if note.session_id != current_session:
             current_session = note.session_id
             lines += [f"## Recorded {day(note.session_started)}", ""]
         at = clock(note.captured_ms)
-        lines += [f"### {at} in this recording", ""]
+        if (note.title or "").strip():
+            lines += [f"### {note.title.strip()}", "", f"{at} in this recording", ""]
+        else:
+            lines += [f"### {at} in this recording", ""]
+        marks = [TAG_TEXT[tag] for tag in note.tags if tag in TAG_TEXT]
+        if marks:
+            lines += [f"*{' · '.join(marks)}*", ""]
         if note.image is not None:
             path = f"images/note-{number:03d}.png"
             images.append((path, note.image))
@@ -111,9 +126,25 @@ def build_markdown(
             lines += [quoted, ""]
         else:
             lines += [f"*{STATUS_TEXT.get(note.status, STATUS_TEXT['pending'])}*", ""]
+        if (note.explanation or "").strip():
+            lines += ["**Explained simply**", "", note.explanation.strip(), ""]
+        if (note.slide_text or "").strip():
+            lines += ["**Text on the slide**", "", note.slide_text.strip(), ""]
+        if note.terms:
+            lines += ["**Key terms**", ""]
+            lines += [f"- **{term}**: {definition}" for term, definition in note.terms]
+            lines += [""]
+            for term, definition in note.terms:
+                glossary.setdefault(term.casefold(), (term, definition))
         if (note.comment or "").strip():
             # Plain paragraphs, so they cannot be mistaken for the quoted speech.
-            lines += ["**My notes**", "", note.comment.strip(), ""]
+            lines += ["**My thoughts**", "", note.comment.strip(), ""]
+    if glossary:
+        lines += ["## Glossary", ""]
+        lines += [
+            f"- **{term}**: {definition}"
+            for _key, (term, definition) in sorted(glossary.items())
+        ]
     return "\n".join(lines).rstrip() + "\n", images
 
 

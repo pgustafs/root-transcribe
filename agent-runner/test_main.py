@@ -108,3 +108,35 @@ def test_exception_and_timeout_become_errors(monkeypatch):
 @pytest.mark.parametrize("payload", [{"instructions": "", "input": "y"}, {"instructions": "x"}])
 def test_invalid_requests_are_rejected(payload):
     assert client.post("/run", json=payload).status_code == 422
+
+
+def test_chat_makes_one_plain_call_and_can_show_an_image(monkeypatch):
+    seen = []
+
+    class FakeModel:
+        async def ainvoke(self, messages):
+            seen.append(messages)
+            return SimpleNamespace(content=[{"type": "text", "text": " # Index scan "}])
+
+    monkeypatch.setattr(main, "_build_model", lambda: FakeModel())
+    body = client.post(
+        "/chat",
+        json={"instructions": "Read the slide.", "input": "", "image_base64": "QUJD"},
+    ).json()
+    assert body["answer"] == "# Index scan" and body["error"] is None
+    system, human = seen[0]
+    assert system.content == "Read the slide."
+    assert human.content[1]["image_url"]["url"] == "data:image/png;base64,QUJD"
+    # Without an image the input is sent as plain text.
+    client.post("/chat", json={"instructions": "x", "input": "Transcript: hi"})
+    assert seen[1][1].content == "Transcript: hi"
+
+
+def test_chat_reports_a_model_error_instead_of_raising(monkeypatch):
+    class Refuses:
+        async def ainvoke(self, messages):
+            raise ValueError("this model does not support image input")
+
+    monkeypatch.setattr(main, "_build_model", lambda: Refuses())
+    body = client.post("/chat", json={"instructions": "x", "image_base64": "QUJD"}).json()
+    assert body["answer"] == "" and "does not support image input" in body["error"]

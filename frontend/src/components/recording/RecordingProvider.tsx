@@ -39,6 +39,7 @@ import { useNavigate } from "react-router-dom";
 import { ChangeSourceDialog } from "@/components/study/ChangeSourceDialog";
 import { useFloatingWindow } from "@/hooks/useFloatingWindow";
 import { FloatingNotePanel } from "@/components/study/FloatingNotePanel";
+import type { NoteCaptureActions } from "@/components/study/NoteCaptureControls";
 import type { Crop } from "@/lib/study/frame";
 import {
   discardStudySessions,
@@ -103,6 +104,10 @@ export type StudyTarget = {
   notebookId: string;
   notebookTitle: string;
   mode: StudyMode;
+  /** Let the language model work on the notes. */
+  enrich?: boolean;
+  /** Offer to keep a slide when it changes. */
+  offerSlides?: boolean;
 };
 
 type RecordingContextValue = {
@@ -217,9 +222,18 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
   const studyController = studyRef.current;
   const floating = useFloatingWindow({
     title: t("study:dock.takeNote"),
-    width: 280,
-    height: 132,
+    width: 340,
+    height: 250,
   });
+  const noteActions = useMemo<NoteCaptureActions>(
+    () => ({
+      onToggle: (thought) => void studyController.toggle({ thought }),
+      onMark: (tag, thought) => void studyController.mark(tag, { thought }),
+      onThought: (thought) => void studyController.addThought(thought),
+      onKeepOffer: (thought) => void studyController.keepOffer({ thought }),
+    }),
+    [studyController],
+  );
   const closeFloating = floating.close;
   const openFloating = floating.open;
   useEffect(() => {
@@ -590,6 +604,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
                 language: opts.requestedLanguage ?? "auto",
                 mode: opts.study.mode,
                 localRecordingId: localId,
+                enrich: opts.study.enrich,
+                offerSlides: opts.study.offerSlides,
               },
               display,
             );
@@ -1092,6 +1108,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
           language: target.requestedLanguage ?? "auto",
           mode: next.mode,
           localRecordingId: localId,
+          enrich: target.study?.enrich,
+          offerSlides: target.study?.offerSlides,
         },
         display,
       );
@@ -1411,7 +1429,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
                           study.active && active
                             ? {
                                 status: study,
-                                onToggle: () => void studyController.toggle(),
+                                actions: noteActions,
                                 onViewNotes: () =>
                                   navigate(
                                     `/workspaces/${study.workspaceId}/study/${study.notebookId}`,
@@ -1486,7 +1504,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
             recording={recorder.status === "recording" && !uploading}
             paused={recorder.status === "paused"}
             durationMs={recorder.durationMs}
-            onToggle={() => void studyController.toggle()}
+            actions={noteActions}
           />,
           floating.container,
         )}
