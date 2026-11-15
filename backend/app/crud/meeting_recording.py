@@ -196,6 +196,18 @@ async def names_for_profiles(
     return {row[0]: row[1] for row in result.all()}
 
 
+def shown_speaker(
+    segment: MeetingTranscriptSegment, profile_names: dict[uuid.UUID, str]
+) -> str | None:
+    """The name to show for a segment's speaker: the one a person typed, else
+    the directory person, else None (the caller shows the detected label)."""
+    if segment.speaker_display_name:
+        return segment.speaker_display_name
+    if segment.speaker_profile_id:
+        return profile_names.get(segment.speaker_profile_id)
+    return None
+
+
 async def assign_speaker_by_label(
     session: AsyncSession,
     *,
@@ -204,10 +216,12 @@ async def assign_speaker_by_label(
     speaker_label: str,
     speaker_profile_id: uuid.UUID | None,
     edited_by_id: uuid.UUID | None,
+    speaker_display_name: str | None = None,
 ) -> int:
-    """Set (or clear, with ``None``) the identified person on EVERY segment of
-    one revision that carries ``speaker_label``. Human-assigned, so any model
-    confidence is cleared. Returns the number of segments updated."""
+    """Set the speaker on EVERY segment of one revision that carries
+    ``speaker_label``: a directory person, a typed name, or neither (anonymous
+    again). One replaces the other. Human-assigned, so any model confidence is
+    cleared. Returns the number of segments updated."""
     result = await session.execute(
         update(MeetingTranscriptSegment)
         .where(
@@ -217,6 +231,7 @@ async def assign_speaker_by_label(
         )
         .values(
             speaker_profile_id=speaker_profile_id,
+            speaker_display_name=speaker_display_name,
             speaker_confidence=None,
             is_edited=True,
             edited_by_id=edited_by_id,

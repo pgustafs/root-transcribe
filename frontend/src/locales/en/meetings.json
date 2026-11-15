@@ -427,5 +427,26 @@
     "en": "English",
     "sv": "Swedish",
     "help": "Choose the spoken language to avoid incorrect detection. Auto detects it for you."
+  },
+  "speakerNames": {
+    "title": "Speakers",
+    "hint": "Give each voice a name. The names apply to this recording only and are used in the transcript, exports and new notes.",
+    "rename": "Rename speakers",
+    "identifyButton": "Identify speakers",
+    "identify": "Find names in the transcript",
+    "identifying": "Reading the transcript…",
+    "noneFound": "No names were found in what was said.",
+    "found_one": "{{count}} name found. Check it before you use it.",
+    "found_other": "{{count}} names found. Check them before you use them.",
+    "identifyFailed": "The names could not be looked for.",
+    "namePlaceholder": "Name",
+    "accept": "Use",
+    "dismiss": "Dismiss",
+    "acceptAria": "Use {{name}} for {{speaker}}",
+    "dismissAria": "Dismiss {{name}} for {{speaker}}",
+    "listen": "Listen at {{time}}",
+    "saved_one": "{{count}} speaker renamed",
+    "saved_other": "{{count}} speakers renamed",
+    "saveFailed": "The name could not be saved."
   }
 }

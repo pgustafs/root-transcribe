@@ -427,5 +427,26 @@
     "en": "Engelska",
     "sv": "Svenska",
     "help": "Välj det talade språket för att undvika felaktig språkidentifiering. Automatiskt identifierar språket åt dig."
+  },
+  "speakerNames": {
+    "title": "Talare",
+    "hint": "Ge varje röst ett namn. Namnen gäller bara den här inspelningen och används i transkriptet, exporter och nya anteckningar.",
+    "rename": "Byt namn på talare",
+    "identifyButton": "Identifiera talare",
+    "identify": "Leta efter namn i transkriptet",
+    "identifying": "Läser transkriptet…",
+    "noneFound": "Inga namn hittades i det som sades.",
+    "found_one": "{{count}} namn hittades. Kontrollera det innan du använder det.",
+    "found_other": "{{count}} namn hittades. Kontrollera dem innan du använder dem.",
+    "identifyFailed": "Det gick inte att leta efter namn.",
+    "namePlaceholder": "Namn",
+    "accept": "Använd",
+    "dismiss": "Avfärda",
+    "acceptAria": "Använd {{name}} för {{speaker}}",
+    "dismissAria": "Avfärda {{name}} för {{speaker}}",
+    "listen": "Lyssna vid {{time}}",
+    "saved_one": "{{count}} talare har bytt namn",
+    "saved_other": "{{count}} talare har bytt namn",
+    "saveFailed": "Namnet kunde inte sparas."
   }
 }

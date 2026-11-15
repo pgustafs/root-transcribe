@@ -644,12 +644,21 @@ and saved credentials. A failed model download does not mean the audio was lost.
    You can navigate away and return; the job continues.
 4. Click a timestamp to listen. Use the speaker chips and transcript search to
    focus the review. Turn off **Follow playback** when editing another part.
-5. Correct text or assign existing speaker profiles from a speaker label. The menu
-   distinguishes a single turn from all turns for that detected voice. Use
-   **Speakers → Add speaker** if a name is missing; adding a name needs no voice
-   sample. Voice recognition is optional. An administrator who enables it for
-   another person must record how consent was obtained before enrolling a sample.
-6. Export a text file, Word/PDF document or timestamped subtitles. Revision review,
+5. Name the speakers. Above the transcript, **Rename speakers** lets you type a
+   name for each detected voice; the name applies to this recording only and is
+   used in the transcript, exports and new notes. With an LLM configured (see
+   Meeting notes), **Identify speakers** reads the transcript for introductions
+   such as "my name is Peter" or "jag heter Anna" and suggests names. Each
+   suggestion shows the words it is based on and is applied only when you
+   choose **Use**; check it first, because the model can attach a real quote to
+   the wrong voice.
+6. Correct text, or assign a person from the speaker directory from a speaker
+   label. The menu distinguishes a single turn from all turns for that detected
+   voice. Use **Speakers → Add speaker** if a person is missing from the
+   directory; adding one needs no voice sample. Voice recognition is optional.
+   An administrator who enables it for another person must record how consent
+   was obtained before enrolling a sample.
+7. Export a text file, Word/PDF document or timestamped subtitles. Revision review,
    comments and privacy controls are under **Review, comments & privacy**.
 
 ### Research behind the interface

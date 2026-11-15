@@ -1512,6 +1512,7 @@ def _apply_redaction_claimed(
                 "end_ms": seg.end_ms,
                 "speaker_label": seg.speaker_label,
                 "speaker_profile_id": seg.speaker_profile_id,
+                "speaker_display_name": seg.speaker_display_name,
                 "speaker_confidence": seg.speaker_confidence,
                 "text": text,
             }
@@ -2657,7 +2658,8 @@ def generate_meeting_note(note_id: str) -> dict[str, str]:
                     ExportSegment(
                         start_ms=s.start_ms,
                         end_ms=s.end_ms,
-                        speaker=names.get(s.speaker_profile_id, s.speaker_label),
+                        speaker=s.speaker_display_name
+                        or names.get(s.speaker_profile_id, s.speaker_label),
                         text=s.text,
                     )
                     for s in segments
@@ -2702,5 +2704,98 @@ def generate_meeting_note(note_id: str) -> dict[str, str]:
             logger.exception("generate_meeting_note: note %s failed", note_id)
             meeting_note_crud.fail_sync(
                 session, note_id=nid, error=f"{type(exc).__name__}: {exc}"
+            )
+            raise
+
+
+@celery_app.task(
+    name="tasks.identify_speaker_names",
+    soft_time_limit=3 * 3600,
+    time_limit=3 * 3600 + 300,
+)
+def identify_speaker_names(run_id: str) -> dict[str, str]:
+    """Have the language model look for the speakers' names in a transcript.
+
+    It only proposes: the run stores suggestions with the quote each one rests
+    on, and a person accepts or dismisses them. Runs on the default queue; the
+    model work happens in the agent-runner container.
+    """
+    from app.crud import speaker_name_run as speaker_name_run_crud
+    from app.models.meeting_transcript_segment import MeetingTranscriptSegment
+    from app.models.speaker_name_run import SpeakerNameRun
+    from app.models.speaker_profile import SpeakerProfile
+    from app.services import agent_runner, meeting_notes, speaker_names
+
+    rid = uuid.UUID(run_id)
+    started = time.monotonic()
+    with session_scope() as session:
+        if not speaker_name_run_crud.claim_processing_sync(session, run_id=rid):
+            logger.info("identify_speaker_names: run %s not pending", run_id)
+            return {"status": "skipped", "reason": "not_pending"}
+        run = session.get(SpeakerNameRun, rid)
+        assert run is not None  # the CAS above just matched this row
+        try:
+            segments = (
+                session.execute(
+                    select(MeetingTranscriptSegment)
+                    .where(MeetingTranscriptSegment.revision_id == run.revision_id)
+                    .order_by(MeetingTranscriptSegment.idx)
+                )
+                .scalars()
+                .all()
+            )
+            if not segments:
+                raise agent_runner.AgentRunError("The transcript is empty.")
+            profile_ids = {
+                s.speaker_profile_id for s in segments if s.speaker_profile_id
+            }
+            names = (
+                dict(
+                    session.execute(
+                        select(SpeakerProfile.id, SpeakerProfile.display_name).where(
+                            SpeakerProfile.id.in_(profile_ids)
+                        )
+                    ).all()
+                )
+                if profile_ids
+                else {}
+            )
+            turns = [
+                speaker_names.Turn(
+                    label=s.speaker_label,
+                    name=s.speaker_display_name or names.get(s.speaker_profile_id),
+                    start_ms=s.start_ms,
+                    text=s.text,
+                )
+                for s in segments
+            ]
+            runner = agent_runner.get_agent_runner()
+            try:
+                max_chars = meeting_notes.input_budget_chars(
+                    runner.context_tokens_sync(),
+                    speaker_names.INSTRUCTIONS,
+                    settings.NOTES_MAX_INPUT_CHARS,
+                )
+            except meeting_notes.ContextTooSmall as exc:
+                raise agent_runner.AgentRunError(str(exc)) from None
+            suggestions, model = speaker_names.suggest_names(
+                runner, turns, max_chars=max_chars
+            )
+            speaker_name_run_crud.complete_sync(
+                session,
+                run_id=rid,
+                suggestions=suggestions,
+                model=model,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            return {"status": "ready", "suggestions": str(len(suggestions))}
+        except agent_runner.AgentRunError as exc:
+            logger.warning("identify_speaker_names: run %s failed: %s", run_id, exc)
+            speaker_name_run_crud.fail_sync(session, run_id=rid, error=str(exc))
+            raise
+        except Exception as exc:
+            logger.exception("identify_speaker_names: run %s failed", run_id)
+            speaker_name_run_crud.fail_sync(
+                session, run_id=rid, error=f"{type(exc).__name__}: {exc}"
             )
             raise

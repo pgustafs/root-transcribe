@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 RecordingLanguage = Literal["auto", "en", "sv"]
 
@@ -47,6 +47,11 @@ class MeetingRecordingPublic(BaseModel):
     updated_at: datetime
 
 
+SpeakerName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)
+]
+
+
 class MeetingSegmentPublic(BaseModel):
     """One speaker turn of the transcript."""
 
@@ -61,7 +66,8 @@ class MeetingSegmentPublic(BaseModel):
     end_ms: int
     speaker_label: str
     speaker_profile_id: uuid.UUID | None = None
-    # Resolved from the directory by the route; None ⇒ anonymous speaker.
+    # A typed name, else the directory person (resolved by the route);
+    # None ⇒ anonymous speaker.
     speaker_name: str | None = None
     speaker_confidence: float | None = None
     text: str
@@ -85,6 +91,8 @@ class MeetingSegmentUpdate(BaseModel):
 
     text: str | None = Field(default=None, max_length=20_000)
     speaker_profile_id: uuid.UUID | None = None
+    # A typed name for this one turn (replaces a directory person).
+    speaker_name: SpeakerName | None = None
     clear_speaker: bool = False
     # Optimistic concurrency: when set, the edit is refused (409) if the
     # segment has changed since this version was read.
@@ -104,6 +112,9 @@ class MeetingSpeakerAssign(BaseModel):
 
     speaker_label: str = Field(min_length=1, max_length=64)
     speaker_profile_id: uuid.UUID | None = None
+    # A typed name ("Peter"): an annotation on this recording only. It is not
+    # added to the speaker directory. Replaces a directory person.
+    speaker_name: SpeakerName | None = None
     clear_speaker: bool = False
 
 

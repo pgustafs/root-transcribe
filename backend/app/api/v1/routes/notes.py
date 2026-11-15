@@ -37,9 +37,12 @@ from app.core.logging import request_id_ctx
 from app.core.meeting_permissions import MeetingCapability
 from app.crud import meeting_governance as meeting_governance_crud
 from app.crud import meeting_note as meeting_note_crud
+from app.crud import meeting_recording as meeting_recording_crud
+from app.crud import speaker_name_run as speaker_name_run_crud
 from app.crud import task_outbox as task_outbox_crud
 from app.crud import transcript_revision as transcript_revision_crud
 from app.models.meeting_note import MeetingNote, NoteAgent
+from app.models.speaker_name_run import SpeakerNameRun
 from app.models.user import User
 from app.schemas.note import (
     MeetingNoteCreate,
@@ -48,6 +51,8 @@ from app.schemas.note import (
     NoteAgentCreate,
     NoteAgentPublic,
     NoteAgentUpdate,
+    SpeakerNameDecision,
+    SpeakerNameRunPublic,
 )
 from app.services import note_export
 from app.services.dependency_health import ensure_notes_path
@@ -420,3 +425,146 @@ async def export_note(
         media_type=note_export.CONTENT_TYPES[format],
         headers={"Content-Disposition": f'attachment; filename="{safe_name}.{format}"'},
     )
+
+
+# --- speaker names found in the transcript ----------------------------------
+
+
+@router.get(
+    _RECORDING + "/speaker-names", dependencies=[Depends(ensure_meetings_enabled)]
+)
+async def latest_speaker_name_run(
+    workspace_id: uuid.UUID,
+    recording_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> SpeakerNameRunPublic | None:
+    """The newest name search on the current transcript, or null."""
+    await _load_authorized(session, user, workspace_id, level="content")
+    await _require_cap(session, user, workspace_id, MeetingCapability.RELABEL_SPEAKERS)
+    rec = await _load_recording(session, workspace_id, recording_id)
+    run = await speaker_name_run_crud.latest(
+        session,
+        recording_id=recording_id,
+        revision_id=transcript_revision_crud.display_revision_id(rec),
+    )
+    return SpeakerNameRunPublic.model_validate(run) if run else None
+
+
+@router.post(
+    _RECORDING + "/speaker-names/identify",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(ensure_meetings_enabled), Depends(ensure_notes_path)],
+)
+async def identify_speaker_names(
+    workspace_id: uuid.UUID,
+    recording_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> SpeakerNameRunPublic:
+    """Ask the language model to find the speakers' names in what was said
+    (202 + the pending run; poll ``GET …/speaker-names``).
+
+    The transcript text goes to the configured LLM, so restricted recordings
+    need an explicit grant, as for notes. The run only proposes names.
+    """
+    await _load_authorized(session, user, workspace_id, level="content")
+    rec = await _load_recording(session, workspace_id, recording_id)
+    await _require_sensitive_cap(
+        session, user, workspace_id, rec, MeetingCapability.RELABEL_SPEAKERS
+    )
+    revision_id = transcript_revision_crud.display_revision_id(rec)
+    if rec.status != "completed" or revision_id is None:
+        raise ConflictError("The recording has no finished transcript yet")
+    current = await speaker_name_run_crud.latest(
+        session, recording_id=recording_id, revision_id=revision_id
+    )
+    if current is not None and current.status in ("pending", "processing"):
+        return SpeakerNameRunPublic.model_validate(current)  # already working
+    run = SpeakerNameRun(
+        recording_id=recording_id, revision_id=revision_id, created_by_id=user.id
+    )
+    session.add(run)
+    await session.flush()
+    outbox = await task_outbox_crud.enqueue(
+        session,
+        task_name="tasks.identify_speaker_names",
+        queue="celery",
+        payload={"run_id": str(run.id)},
+        headers={"request_id": request_id_ctx.get(), "user": user.email},
+        dedupe_key=f"speaker-names:{run.id}:send:1",
+    )
+    await meeting_governance_crud.record_audit(
+        session,
+        action="speaker_names.identify",
+        actor=user,
+        workspace_id=workspace_id,
+        recording_id=recording_id,
+        target={"run_id": str(run.id), "revision_id": str(revision_id)},
+        request_id=request_id_ctx.get(),
+    )
+    await session.commit()
+    await try_dispatch(session, outbox)
+    await session.refresh(run)
+    return SpeakerNameRunPublic.model_validate(run)
+
+
+@router.post(
+    _RECORDING + "/speaker-names/{run_id}/suggestions/{index}",
+    dependencies=[Depends(ensure_meetings_enabled)],
+)
+async def decide_speaker_name(
+    workspace_id: uuid.UUID,
+    recording_id: uuid.UUID,
+    run_id: uuid.UUID,
+    index: int,
+    payload: SpeakerNameDecision,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> SpeakerNameRunPublic:
+    """Use a suggested name for the speaker (every turn of that voice), or
+    dismiss it. Accepting is a human decision and is recorded as one."""
+    await _load_authorized(session, user, workspace_id, level="content")
+    await _require_cap(session, user, workspace_id, MeetingCapability.RELABEL_SPEAKERS)
+    await _load_recording(session, workspace_id, recording_id)
+    run = await speaker_name_run_crud.get(
+        session, recording_id=recording_id, run_id=run_id
+    )
+    if run is None or not 0 <= index < len(run.suggestions):
+        raise NotFoundError("Suggestion not found")
+    suggestion = dict(run.suggestions[index])
+    if suggestion["status"] != "pending":
+        raise ConflictError("This suggestion was already decided")
+    if payload.decision == "accept":
+        updated = await meeting_recording_crud.assign_speaker_by_label(
+            session,
+            recording_id=recording_id,
+            revision_id=run.revision_id,
+            speaker_label=suggestion["speaker_label"],
+            speaker_profile_id=None,
+            speaker_display_name=suggestion["name"],
+            edited_by_id=user.id,
+        )
+        await transcript_revision_crud.record_edit_event(
+            session,
+            revision_id=run.revision_id,
+            segment_id=None,
+            segment_idx=None,
+            event_type="bulk_assign",
+            before={"speaker_label": suggestion["speaker_label"]},
+            after={
+                "speaker_name": suggestion["name"],
+                "suggested_from": suggestion["quote"],
+                "updated_segments": updated,
+            },
+            actor=user,
+            request_id=request_id_ctx.get(),
+        )
+    suggestion["status"] = "accepted" if payload.decision == "accept" else "dismissed"
+    # A new list: the JSON column only notices a replaced value.
+    run.suggestions = [
+        suggestion if i == index else item for i, item in enumerate(run.suggestions)
+    ]
+    await session.commit()
+    await session.refresh(run)
+    return SpeakerNameRunPublic.model_validate(run)

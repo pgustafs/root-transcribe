@@ -37,6 +37,7 @@ from app.models.speaker_consent import (
     SpeakerConsentRecord,  # noqa: F401
     SpeakerSuggestion,  # noqa: F401
 )
+from app.models.speaker_name_run import SpeakerNameRun  # noqa: F401
 from app.models.speaker_profile import (
     SpeakerProfile,  # noqa: F401
     SpeakerVoiceprint,  # noqa: F401

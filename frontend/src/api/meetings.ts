@@ -4,6 +4,7 @@ import { apiClient } from "@/api/client";
 import type {
   DlpFinding,
   DlpTerm,
+  SpeakerNameRun,
   MeetingClip,
   MeetingComment,
   MeetingRecording,
@@ -194,12 +195,50 @@ export async function assignSpeakerByLabel(
   input: {
     speaker_label: string;
     speaker_profile_id?: string | null;
+    /** A typed name for this recording only (not added to the directory). */
+    speaker_name?: string;
     clear_speaker?: boolean;
   },
 ): Promise<{ updated_segments: number }> {
   const { data } = await apiClient.post<{ updated_segments: number }>(
     `/workspaces/${workspaceId}/recordings/${recordingId}/assign-speaker`,
     input,
+  );
+  return data;
+}
+
+/** The newest name search on the current transcript, or null. */
+export async function getSpeakerNameRun(
+  workspaceId: string,
+  recordingId: string,
+): Promise<SpeakerNameRun | null> {
+  const { data } = await apiClient.get<SpeakerNameRun | null>(
+    `/workspaces/${workspaceId}/recordings/${recordingId}/speaker-names`,
+  );
+  return data;
+}
+
+/** Ask the language model to find the speakers' names in what was said. */
+export async function identifySpeakerNames(
+  workspaceId: string,
+  recordingId: string,
+): Promise<SpeakerNameRun> {
+  const { data } = await apiClient.post<SpeakerNameRun>(
+    `/workspaces/${workspaceId}/recordings/${recordingId}/speaker-names/identify`,
+  );
+  return data;
+}
+
+export async function decideSpeakerName(
+  workspaceId: string,
+  recordingId: string,
+  runId: string,
+  index: number,
+  decision: "accept" | "dismiss",
+): Promise<SpeakerNameRun> {
+  const { data } = await apiClient.post<SpeakerNameRun>(
+    `/workspaces/${workspaceId}/recordings/${recordingId}/speaker-names/${runId}/suggestions/${index}`,
+    { decision },
   );
   return data;
 }

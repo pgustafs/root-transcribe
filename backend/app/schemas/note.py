@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -79,3 +80,36 @@ class MeetingNotePublic(BaseModel):
     created_by_email: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class SpeakerNameSuggestion(BaseModel):
+    """A name the language model found for one speaker, with its evidence."""
+
+    speaker_label: str
+    name: str
+    # The words from the transcript the name rests on, and where they are.
+    quote: str
+    start_ms: int
+    confidence: Literal["high", "medium"]
+    status: Literal["pending", "accepted", "dismissed"]
+
+
+class SpeakerNameRunPublic(BaseModel):
+    """One "find the names in the transcript" run."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    recording_id: uuid.UUID
+    revision_id: uuid.UUID
+    status: str
+    suggestions: list[SpeakerNameSuggestion] = Field(default_factory=list)
+    error: str | None = None
+    model: str | None = None
+    duration_ms: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SpeakerNameDecision(BaseModel):
+    decision: Literal["accept", "dismiss"]

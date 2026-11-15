@@ -169,6 +169,31 @@ export type MeetingSegment = {
   is_edited: boolean;
 };
 
+/** A name the language model found for a speaker, with its evidence. */
+export type SpeakerNameSuggestion = {
+  speaker_label: string;
+  name: string;
+  /** The words from the transcript the name rests on, and where they are. */
+  quote: string;
+  start_ms: number;
+  confidence: "high" | "medium";
+  status: "pending" | "accepted" | "dismissed";
+};
+
+/** One "find the names in the transcript" run. */
+export type SpeakerNameRun = {
+  id: string;
+  recording_id: string;
+  revision_id: string;
+  status: "pending" | "processing" | "ready" | "failed";
+  suggestions: SpeakerNameSuggestion[];
+  error: string | null;
+  model: string | null;
+  duration_ms: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
 /** A recording plus its ordered transcript segments. */
 export type MeetingRecordingDetail = MeetingRecording & {
   segments: MeetingSegment[];

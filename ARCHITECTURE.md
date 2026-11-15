@@ -280,6 +280,29 @@ a margin over the next candidate and suitable speaker turns. Uncertain matches
 become suggestions for review. Naming a speaker in a transcript does not enroll
 a voiceprint or establish consent.
 
+A speaker in a transcript gets a name in one of three ways, and never without a
+person deciding:
+
+- **Typed name.** `speaker_display_name` on the segments of one detected voice
+  (`POST …/assign-speaker` with `speaker_name`, or one segment via `PATCH`). It
+  is an annotation on that recording: no directory entry and no voiceprint. It
+  is copied when a redaction or re-transcription creates a new revision.
+- **Directory person.** `speaker_profile_id`, chosen by hand or by accepting a
+  voiceprint suggestion.
+- **Name found in the transcript.** `POST …/speaker-names/identify` queues
+  `tasks.identify_speaker_names`, which sends the transcript to the LLM through
+  the agent runner with fixed instructions and stores a `speaker_name_run` with
+  suggestions. Every suggestion carries the quote it rests on; the server drops
+  any whose quote is not in the transcript or does not contain the name
+  ([speaker_names.py](backend/app/services/speaker_names.py)). Accepting one
+  writes a typed name.
+
+The shown name is the typed name, else the directory person, else the detected
+label. A typed name and a directory person replace each other; the last action
+wins. All three need `relabel_speakers`; looking for names also needs the LLM to
+be configured and, on a restricted recording, an explicit user grant, because
+the transcript leaves the app for the LLM endpoint.
+
 Voiceprint vectors are Fernet-encrypted in PostgreSQL. The default encryption
 key derives from `SECRET_KEY`; configured named keys allow explicit rotation.
 Original audio and retained samples are S3 objects: voiceprint encryption does
@@ -312,14 +335,14 @@ Source: [API identity dependencies](backend/app/api/deps.py),
 The schema groups records into accounts/workspaces/membership, recordings/upload
 sessions, transcription attempts/outbox/jobs, revisions/segments/edit events,
 speakers/voiceprints/consent/suggestions, comments/clips/privacy/audit records,
-and note agents/meeting notes.
+note agents/meeting notes, and speaker-name runs.
 Audio bytes live in S3; database rows hold opaque keys and lifecycle metadata.
 Browser IndexedDB contains local recovery copies, independently of server storage.
 
 Alembic migrations are explicit and ordered. `0001_transcription` initializes
 an empty application database; `0002_recording_language` and
-`0003_meeting_notes` upgrade it (the latter also inserts the built-in note
-agents). Run
+`0003_meeting_notes` and `0004_speaker_names` upgrade it (`0003` also inserts
+the built-in note agents). Run
 `alembic upgrade head` for both new installations and upgrades. Do not edit an
 applied migration or change version markers to bypass an upgrade. Schema parity
 and upgrade/downgrade checks are in

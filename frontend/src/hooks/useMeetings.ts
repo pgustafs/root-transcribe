@@ -12,6 +12,7 @@ import type {
   MeetingClip,
   MeetingStatus,
   RecordingLanguage,
+  SpeakerNameRun,
 } from "@/api/types";
 
 const TERMINAL: MeetingStatus[] = ["completed", "failed"];
@@ -141,12 +142,73 @@ export function useAssignSpeakerByLabel(
     mutationFn: (input: {
       speaker_label: string;
       speaker_profile_id?: string | null;
+      speaker_name?: string;
       clear_speaker?: boolean;
     }) => meetingsApi.assignSpeakerByLabel(workspaceId, recordingId, input),
     onSuccess: () =>
       qc.invalidateQueries({
         queryKey: meetingKeys.detail(workspaceId, recordingId),
       }),
+  });
+}
+
+const speakerNameKeys = (workspaceId: string, recordingId: string) =>
+  ["meetings", workspaceId, recordingId, "speaker-names"] as const;
+
+/** The newest name search; polls while the model is reading the transcript. */
+export function useSpeakerNameRun(
+  workspaceId: string,
+  recordingId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: speakerNameKeys(workspaceId, recordingId),
+    queryFn: () => meetingsApi.getSpeakerNameRun(workspaceId, recordingId),
+    enabled: enabled && Boolean(workspaceId) && Boolean(recordingId),
+    refetchInterval: (query) => {
+      const status = (query.state.data as SpeakerNameRun | null | undefined)
+        ?.status;
+      return status === "pending" || status === "processing" ? 2000 : false;
+    },
+  });
+}
+
+export function useIdentifySpeakerNames(
+  workspaceId: string,
+  recordingId: string,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      meetingsApi.identifySpeakerNames(workspaceId, recordingId),
+    onSuccess: (run) =>
+      qc.setQueryData(speakerNameKeys(workspaceId, recordingId), run),
+  });
+}
+
+/** Use or dismiss one suggested name; using it renames the speaker. */
+export function useDecideSpeakerName(workspaceId: string, recordingId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      runId: string;
+      index: number;
+      decision: "accept" | "dismiss";
+    }) =>
+      meetingsApi.decideSpeakerName(
+        workspaceId,
+        recordingId,
+        input.runId,
+        input.index,
+        input.decision,
+      ),
+    onSuccess: (run, input) => {
+      qc.setQueryData(speakerNameKeys(workspaceId, recordingId), run);
+      if (input.decision === "accept")
+        void qc.invalidateQueries({
+          queryKey: meetingKeys.detail(workspaceId, recordingId),
+        });
+    },
   });
 }
 

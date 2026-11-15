@@ -64,6 +64,10 @@ class MeetingTranscriptSegment(Base):
     speaker_profile_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("speaker_profile.id", ondelete="SET NULL"), nullable=True
     )
+    # A name a person typed (or accepted from a suggestion) for this speaker in
+    # this recording. An annotation only: no directory entry, no voiceprint.
+    # Shown in preference to the directory person; setting one clears the other.
+    speaker_display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # Cosine similarity of the match (None when anonymous or human-assigned).
     speaker_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)

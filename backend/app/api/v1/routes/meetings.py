@@ -371,8 +371,7 @@ async def _segments_public(session: SessionDep, segments) -> list[MeetingSegment
     out: list[MeetingSegmentPublic] = []
     for s in segments:
         item = MeetingSegmentPublic.model_validate(s)
-        if s.speaker_profile_id:
-            item.speaker_name = names.get(s.speaker_profile_id)
+        item.speaker_name = meeting_recording_crud.shown_speaker(s, names)
         out.append(item)
     return out
 
@@ -903,16 +902,24 @@ async def update_segment(
         "speaker_profile_id": (
             str(segment.speaker_profile_id) if segment.speaker_profile_id else None
         ),
+        "speaker_name": segment.speaker_display_name,
     }
     event_type = "text_edit" if payload.text is not None else "speaker_assign"
     if payload.text is not None:
         segment.text = payload.text
+    # A directory person and a typed name replace each other: last one wins.
     if payload.clear_speaker:
         segment.speaker_profile_id = None
+        segment.speaker_display_name = None
         segment.speaker_confidence = None
         event_type = "speaker_clear" if payload.text is None else event_type
+    elif payload.speaker_name is not None:
+        segment.speaker_display_name = payload.speaker_name
+        segment.speaker_profile_id = None
+        segment.speaker_confidence = None
     elif payload.speaker_profile_id is not None:
         segment.speaker_profile_id = payload.speaker_profile_id
+        segment.speaker_display_name = None
         segment.speaker_confidence = None  # human-assigned ⇒ no model confidence
     segment.is_edited = True
     segment.edited_by_id = user.id
@@ -929,6 +936,7 @@ async def update_segment(
             "speaker_profile_id": (
                 str(segment.speaker_profile_id) if segment.speaker_profile_id else None
             ),
+            "speaker_name": segment.speaker_display_name,
         },
         actor=user,
         reason=payload.reason,
@@ -964,7 +972,13 @@ async def assign_speaker_by_label(
     revision_id = transcript_revision_crud.display_revision_id(rec)
     if revision_id is None:
         raise ConflictError("This recording has no transcript yet")
-    profile_id = None if payload.clear_speaker else payload.speaker_profile_id
+    # Clear, a typed name, or a directory person: each replaces the others.
+    name = None if payload.clear_speaker else payload.speaker_name
+    profile_id = (
+        None
+        if payload.clear_speaker or name is not None
+        else payload.speaker_profile_id
+    )
     if profile_id is not None:
         # The target must be a real directory entry (FK would fail late otherwise).
         from app.crud import speaker_profile as speaker_profile_crud
@@ -977,6 +991,7 @@ async def assign_speaker_by_label(
         revision_id=revision_id,
         speaker_label=payload.speaker_label,
         speaker_profile_id=profile_id,
+        speaker_display_name=name,
         edited_by_id=user.id,
     )
     if updated:
@@ -989,6 +1004,7 @@ async def assign_speaker_by_label(
             before={"speaker_label": payload.speaker_label},
             after={
                 "speaker_profile_id": str(profile_id) if profile_id else None,
+                "speaker_name": name,
                 "updated_segments": updated,
             },
             actor=user,
@@ -2086,11 +2102,7 @@ async def export_revision(
         transcript_export.ExportSegment(
             start_ms=s.start_ms,
             end_ms=s.end_ms,
-            speaker=(
-                names.get(s.speaker_profile_id, s.speaker_label)
-                if s.speaker_profile_id
-                else s.speaker_label
-            ),
+            speaker=(meeting_recording_crud.shown_speaker(s, names) or s.speaker_label),
             text=s.text,
         )
         for s in segments

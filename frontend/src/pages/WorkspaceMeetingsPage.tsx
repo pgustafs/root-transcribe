@@ -12,6 +12,7 @@ import {
   RotateCwIcon,
   UsersIcon,
   PencilIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -129,6 +130,7 @@ import { MeetingDlpPanel } from "@/components/workspace/MeetingDlpPanel";
 import { MeetingRevisionsModal } from "@/components/workspace/MeetingRevisionsModal";
 import { RecordMeetingModal } from "@/components/workspace/RecordMeetingModal";
 import { SpeakerFilter } from "@/components/workspace/SpeakerFilter";
+import { SpeakersDialog } from "@/components/workspace/SpeakersDialog";
 import { RecordingGuide } from "@/components/RecordingGuide";
 import { speakerLabel } from "@/utils/speakerLabel";
 import { useConfig } from "@/hooks/useConfig";
@@ -137,6 +139,7 @@ import {
   useAcceptSpeakerSuggestion,
   useAddManualDlpFinding,
   useAssignSpeakerByLabel,
+  useIdentifySpeakerNames,
   useCreateRecording,
   useDeleteRecording,
   useMeetingPermissions,
@@ -913,6 +916,8 @@ function MeetingDetail({
     detail.data?.status === "completed",
   );
   const acceptSuggestion = useAcceptSpeakerSuggestion(workspaceId, recordingId);
+  const identifySpeakers = useIdentifySpeakerNames(workspaceId, recordingId);
+  const [speakersOpen, setSpeakersOpen] = useState(false);
   const rejectSuggestion = useRejectSpeakerSuggestion(workspaceId, recordingId);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   // "loading" | "ready" | "error" | "unavailable" — the player region is always
@@ -1524,11 +1529,56 @@ function MeetingDetail({
                         </FieldLabel>
                       </Field>
                     </div>
-                    <SpeakerFilter
-                      segments={rec.segments}
-                      selected={selectedSpeaker}
-                      onSelect={setSelectedSpeaker}
-                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <SpeakerFilter
+                        segments={rec.segments}
+                        selected={selectedSpeaker}
+                        onSelect={setSelectedSpeaker}
+                      />
+                      {can("relabel_speakers") && (
+                        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSpeakersOpen(true)}
+                          >
+                            <PencilIcon data-icon="inline-start" />
+                            {t("speakerNames.rename")}
+                          </Button>
+                          {config.data?.notes_status === "available" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                identifySpeakers.mutate(undefined, {
+                                  onError: (cause) =>
+                                    setDetailError(
+                                      getErrorMessage(
+                                        cause,
+                                        t("speakerNames.identifyFailed"),
+                                      ),
+                                    ),
+                                });
+                                setSpeakersOpen(true);
+                              }}
+                            >
+                              <SparklesIcon data-icon="inline-start" />
+                              {t("speakerNames.identifyButton")}
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {speakersOpen && (
+                      <SpeakersDialog
+                        workspaceId={workspaceId}
+                        recordingId={recordingId}
+                        segments={rec.segments}
+                        canIdentify={config.data?.notes_status === "available"}
+                        onSeek={seekTo}
+                        onClose={() => setSpeakersOpen(false)}
+                      />
+                    )}
                     <div className="transcript-timeline">
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
                         <span>{t("review.speakerActivity")}</span>

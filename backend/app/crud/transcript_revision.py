@@ -150,6 +150,7 @@ def carry_over_edits_sync(
             before = {"text": best.text, "speaker_profile_id": _s(best)}
             best.text = old.text
             best.speaker_profile_id = old.speaker_profile_id
+            best.speaker_display_name = old.speaker_display_name
             best.speaker_confidence = old.speaker_confidence
             best.is_edited = True
             best.edited_by_id = old.edited_by_id
