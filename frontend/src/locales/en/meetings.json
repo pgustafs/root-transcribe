@@ -276,13 +276,13 @@
   },
   "dlp": {
     "viewDlp": "Sensitive content",
-    "hint": "Detector findings propose sensitive spans. Accept the real ones, then apply — redaction supersedes the transcript with a masked revision and mutes the audio ranges.",
+    "hint": "Find personal details and secrets in this transcript and remove them. Accept what should go, then apply: the words are masked in a new version of the transcript and that part of the audio is muted.",
     "scan": "Scan now",
     "apply": "Apply redaction ({{count}})",
     "applying": "Applying the redaction…",
     "applied": "Redaction queued — the transcript and audio will update shortly.",
-    "emptyTitle": "No findings",
-    "emptyBody": "No sensitive content has been detected in this transcript. Run a scan after adding workspace DLP terms, or mark a segment for redaction from the transcript.",
+    "emptyTitle": "Nothing found",
+    "emptyBody": "Every new transcript is scanned for the things listed above. Add your own words, such as a project name or a personal number, or choose Redact in the menu on a transcript line.",
     "accept": "Accept",
     "dismiss": "Dismiss",
     "markSegment": "Redact",
@@ -301,14 +301,34 @@
       "redacted": "Redacted",
       "redacting": "Redacting…"
     },
-    "scanQueued": "DLP scan requested",
     "scanFailed": "The scan could not be started.",
     "updateFailed": "The finding could not be updated.",
     "applyFailed": "The redaction could not be applied.",
     "confirmTitle": "Apply redaction?",
     "confirmBody_one": "{{count}} accepted finding is masked in a new transcript revision, and its audio range is muted. This cannot be undone.",
     "confirmBody_other": "{{count}} accepted findings are masked in a new transcript revision, and their audio ranges are muted. This cannot be undone.",
-    "confirmApply": "Apply redaction"
+    "confirmApply": "Apply redaction",
+    "scanning": "Scanning…",
+    "scanDone_one": "Scan finished: {{count}} finding.",
+    "scanDone_other": "Scan finished: {{count}} findings.",
+    "emptyBodyScanned": "The scan found none of the things listed above. Add your own words, or choose Redact in the menu on a transcript line.",
+    "terms": {
+      "title": "What the scan looks for",
+      "hint": "The first four are always on. Words you add apply to every recording in this workspace.",
+      "builtin": {
+        "email": "Email addresses",
+        "phone": "Phone numbers",
+        "card": "Payment card numbers",
+        "secret": "Passwords and keys"
+      },
+      "wordLabel": "Word or phrase to look for",
+      "wordPlaceholder": "A word or phrase, e.g. Project Falcon",
+      "add": "Add",
+      "regex": "Regular expression",
+      "remove": "Stop looking for {{word}}",
+      "addFailed": "The word could not be added.",
+      "removeFailed": "The word could not be removed."
+    }
   },
   "dsar": {
     "title": "Compliance exports (DSAR)",

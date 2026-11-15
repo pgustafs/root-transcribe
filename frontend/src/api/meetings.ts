@@ -3,6 +3,7 @@
 import { apiClient } from "@/api/client";
 import type {
   DlpFinding,
+  DlpTerm,
   MeetingClip,
   MeetingComment,
   MeetingRecording,
@@ -569,6 +570,34 @@ export async function createClipPlaybackSession(
     `/workspaces/${workspaceId}/recordings/${recordingId}/clips/${clipId}/audio/session`,
   );
   return data;
+}
+
+/** The workspace's own words and patterns to look for. */
+export async function listDlpTerms(workspaceId: string): Promise<DlpTerm[]> {
+  const { data } = await apiClient.get<DlpTerm[]>(
+    `/workspaces/${workspaceId}/meetings/dlp-terms`,
+  );
+  return data;
+}
+
+export async function addDlpTerm(
+  workspaceId: string,
+  input: { pattern: string; is_regex: boolean; label: string | null },
+): Promise<DlpTerm> {
+  const { data } = await apiClient.post<DlpTerm>(
+    `/workspaces/${workspaceId}/meetings/dlp-terms`,
+    input,
+  );
+  return data;
+}
+
+export async function deleteDlpTerm(
+  workspaceId: string,
+  termId: string,
+): Promise<void> {
+  await apiClient.delete(
+    `/workspaces/${workspaceId}/meetings/dlp-terms/${termId}`,
+  );
 }
 
 /** DLP review & redaction (issue #6, E4). */

@@ -276,13 +276,13 @@
   },
   "dlp": {
     "viewDlp": "Känsligt innehåll",
-    "hint": "Detektorfynd föreslår känsliga avsnitt. Godkänn de riktiga och verkställ — maskningen ersätter transkriptet med en maskerad revision och tystar ljudintervallen.",
+    "hint": "Hitta personuppgifter och hemligheter i transkriptet och ta bort dem. Godkänn det som ska bort och verkställ sedan: orden maskeras i en ny version av transkriptet och ljudet tystas där.",
     "scan": "Skanna nu",
     "apply": "Verkställ maskning ({{count}})",
     "applying": "Verkställer maskningen…",
     "applied": "Maskningen är köad — transkript och ljud uppdateras strax.",
-    "emptyTitle": "Inga fynd",
-    "emptyBody": "Inget känsligt innehåll har upptäckts i transkriptet. Kör en skanning efter att arbetsytans DLP-termer lagts till, eller markera ett segment för maskning från transkriptet.",
+    "emptyTitle": "Inget hittades",
+    "emptyBody": "Varje nytt transkript skannas efter det som listas ovan. Lägg till egna ord, till exempel ett projektnamn eller ett personnummer, eller välj Maskera i menyn på en rad i transkriptet.",
     "accept": "Godkänn",
     "dismiss": "Avfärda",
     "markSegment": "Maskera",
@@ -301,14 +301,34 @@
       "redacted": "Maskerad",
       "redacting": "Maskerar…"
     },
-    "scanQueued": "DLP-skanning begärd",
     "scanFailed": "Skanningen kunde inte startas.",
     "updateFailed": "Fyndet kunde inte uppdateras.",
     "applyFailed": "Maskeringen kunde inte tillämpas.",
     "confirmTitle": "Tillämpa maskering?",
     "confirmBody_one": "{{count}} godkänt fynd maskeras i en ny utskriftsrevision och dess ljudavsnitt tystas. Det går inte att ångra.",
     "confirmBody_other": "{{count}} godkända fynd maskeras i en ny utskriftsrevision och deras ljudavsnitt tystas. Det går inte att ångra.",
-    "confirmApply": "Tillämpa maskering"
+    "confirmApply": "Tillämpa maskering",
+    "scanning": "Skannar…",
+    "scanDone_one": "Skanningen är klar: {{count}} fynd.",
+    "scanDone_other": "Skanningen är klar: {{count}} fynd.",
+    "emptyBodyScanned": "Skanningen hittade inget av det som listas ovan. Lägg till egna ord, eller välj Maskera i menyn på en rad i transkriptet.",
+    "terms": {
+      "title": "Det här letar skanningen efter",
+      "hint": "De fyra första är alltid på. Ord du lägger till gäller alla inspelningar i arbetsytan.",
+      "builtin": {
+        "email": "E-postadresser",
+        "phone": "Telefonnummer",
+        "card": "Kortnummer",
+        "secret": "Lösenord och nycklar"
+      },
+      "wordLabel": "Ord eller fras att leta efter",
+      "wordPlaceholder": "Ett ord eller en fras, t.ex. Projekt Falken",
+      "add": "Lägg till",
+      "regex": "Reguljärt uttryck",
+      "remove": "Sluta leta efter {{word}}",
+      "addFailed": "Ordet kunde inte läggas till.",
+      "removeFailed": "Ordet kunde inte tas bort."
+    }
   },
   "dsar": {
     "title": "Efterlevnadsexporter (DSAR)",

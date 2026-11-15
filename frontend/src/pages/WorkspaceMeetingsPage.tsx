@@ -1473,7 +1473,12 @@ function MeetingDetail({
             onValueChange={(value) => setView(value as typeof view)}
             className="transcript-tabs min-h-0 flex-1 gap-0"
           >
-            <TabsList variant="line" aria-label={t("review.views")}>
+            <TabsList
+              variant="line"
+              aria-label={t("review.views")}
+              // Four tabs are wider than a phone: the row scrolls, not the page.
+              className="max-w-full justify-start overflow-x-auto overflow-y-hidden"
+            >
               <TabsTrigger value="transcript">
                 {t("review.transcript")}
               </TabsTrigger>

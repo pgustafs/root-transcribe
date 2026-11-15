@@ -206,6 +206,17 @@ export type MeetingUploadSession = {
   created_at: string;
 };
 
+/** A word or pattern a workspace wants found in its transcripts. */
+export type DlpTerm = {
+  id: string;
+  pattern: string;
+  is_regex: boolean;
+  label: string | null;
+  active: boolean;
+  created_by_email: string | null;
+  created_at: string;
+};
+
 /** One DLP detector hit awaiting review (issue #6, E4). */
 export type DlpFinding = {
   id: string;

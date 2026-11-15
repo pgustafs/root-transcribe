@@ -415,11 +415,49 @@ export function useDlpFindings(
   workspaceId: string,
   recordingId: string,
   enabled: boolean,
+  /** Re-read every 1.5 s while a requested scan is being worked on. */
+  polling = false,
 ) {
   return useQuery({
     queryKey: dlpKeys(workspaceId, recordingId),
     queryFn: () => meetingsApi.listDlpFindings(workspaceId, recordingId),
     enabled: enabled && Boolean(workspaceId) && Boolean(recordingId),
+    refetchInterval: polling ? 1500 : false,
+  });
+}
+
+const dlpTermKeys = (workspaceId: string) =>
+  ["meetings", workspaceId, "dlp-terms"] as const;
+
+/** The workspace's own words and patterns to look for. */
+export function useDlpTerms(workspaceId: string) {
+  return useQuery({
+    queryKey: dlpTermKeys(workspaceId),
+    queryFn: () => meetingsApi.listDlpTerms(workspaceId),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useAddDlpTerm(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      pattern: string;
+      is_regex: boolean;
+      label: string | null;
+    }) => meetingsApi.addDlpTerm(workspaceId, input),
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: dlpTermKeys(workspaceId) }),
+  });
+}
+
+export function useDeleteDlpTerm(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (termId: string) =>
+      meetingsApi.deleteDlpTerm(workspaceId, termId),
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: dlpTermKeys(workspaceId) }),
   });
 }
 

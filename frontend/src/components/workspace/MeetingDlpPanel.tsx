@@ -1,4 +1,8 @@
-import { ShieldCheckIcon as ShieldAltIcon, XIcon } from "lucide-react";
+import {
+  PlusIcon,
+  ShieldCheckIcon as ShieldAltIcon,
+  XIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +14,7 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 
-import { useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getErrorMessage } from "@/api/client";
@@ -18,10 +22,15 @@ import type { DlpFinding } from "@/api/types";
 import { Alert } from "@/components/Alert";
 import { DataState } from "@/components/DataState";
 import { StatusLabel } from "@/components/StatusLabel";
-import { useToast } from "@/components/toast/useToast";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
+  useAddDlpTerm,
   useApplyRedaction,
+  useDeleteDlpTerm,
   useDlpFindings,
+  useDlpTerms,
   useRequestDlpScan,
   useSetDlpFindingStatus,
 } from "@/hooks/useMeetings";
@@ -42,6 +51,10 @@ const FINDING_STATUS: Record<DlpFinding["status"], StatusPresentation> = {
   redacted: danger("meetings:dlp.status.redacted"),
 };
 
+/** How long the list is re-read after a scan was requested. */
+const SCAN_WATCH_MS = 8000;
+const BUILT_IN = ["email", "phone", "card", "secret"] as const;
+
 export function MeetingDlpPanel({
   workspaceId,
   recordingId,
@@ -53,14 +66,54 @@ export function MeetingDlpPanel({
   onSeek: (ms: number) => void;
 }) {
   const { t } = useTranslation(["meetings", "common"]);
-  const toast = useToast();
   const [confirmingApply, setConfirmingApply] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const onActionError = (fallbackKey: string) => (error: unknown) =>
     setActionError(getErrorMessage(error, t(fallbackKey)));
-  const findings = useDlpFindings(workspaceId, recordingId, true);
+  // The scan runs in the background and reports nothing back, so the list is
+  // re-read for a few seconds after one was requested.
+  const [scanning, setScanning] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  useEffect(() => {
+    if (!scanning) return;
+    const timer = window.setTimeout(() => {
+      setScanning(false);
+      setScanned(true);
+    }, SCAN_WATCH_MS);
+    return () => window.clearTimeout(timer);
+  }, [scanning]);
+  const findings = useDlpFindings(workspaceId, recordingId, true, scanning);
   const setStatus = useSetDlpFindingStatus(workspaceId, recordingId);
   const scan = useRequestDlpScan(workspaceId, recordingId);
+  const terms = useDlpTerms(workspaceId);
+  const addTerm = useAddDlpTerm(workspaceId);
+  const removeTerm = useDeleteDlpTerm(workspaceId);
+  const [word, setWord] = useState("");
+  const [isRegex, setIsRegex] = useState(false);
+
+  const startScan = () => {
+    setActionError(null);
+    scan.mutate(undefined, {
+      onSuccess: () => setScanning(true),
+      onError: onActionError("dlp.scanFailed"),
+    });
+  };
+  const submitWord = (event: FormEvent) => {
+    event.preventDefault();
+    const pattern = word.trim();
+    if (!pattern) return;
+    setActionError(null);
+    addTerm.mutate(
+      { pattern, is_regex: isRegex, label: isRegex ? null : pattern },
+      {
+        onSuccess: () => {
+          setWord("");
+          startScan();
+        },
+        onError: onActionError("dlp.terms.addFailed"),
+      },
+    );
+  };
   const apply = useApplyRedaction(workspaceId, recordingId);
 
   const rows = findings.data ?? [];
@@ -68,45 +121,110 @@ export function MeetingDlpPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div>
-            <small className="app-copy">{t("dlp.hint")}</small>
-          </div>
-          <div>
-            <Button
-              onClick={() => {
-                setActionError(null);
-                scan.mutate(undefined, {
-                  onSuccess: () => toast.success(t("dlp.scanQueued")),
-                  onError: onActionError("dlp.scanFailed"),
-                });
-              }}
-              disabled={scan.isPending}
-              variant="outline"
-              size="sm"
-            >
-              {t("dlp.scan")}
-            </Button>
-          </div>
-          <div>
-            <Button
-              onClick={() => setConfirmingApply(true)}
-              disabled={acceptedCount === 0 || apply.isPending}
-              aria-busy={apply.isPending}
-              variant="destructive"
-              size="sm"
-            >
-              {apply.isPending && (
-                <Spinner
-                  data-icon="inline-start"
-                  aria-label={t("dlp.applying")}
-                />
-              )}
-              {t("dlp.apply", { count: acceptedCount })}
-            </Button>
-          </div>
+      <p className="text-sm text-muted-foreground">{t("dlp.hint")}</p>
+      <section
+        aria-labelledby="dlp-terms-title"
+        className="flex flex-col gap-3 rounded-lg border p-4"
+      >
+        <div>
+          <h3 id="dlp-terms-title" className="text-sm font-medium">
+            {t("dlp.terms.title")}
+          </h3>
+          <p className="text-sm text-muted-foreground">{t("dlp.terms.hint")}</p>
         </div>
+        <ul className="flex flex-wrap gap-2" aria-label={t("dlp.terms.title")}>
+          {BUILT_IN.map((detector) => (
+            <li key={detector}>
+              <Badge variant="secondary">
+                {t(`dlp.terms.builtin.${detector}`)}
+              </Badge>
+            </li>
+          ))}
+          {(terms.data ?? []).map((term) => (
+            <li key={term.id}>
+              <Badge variant="outline" className="gap-1 pr-1">
+                {term.is_regex ? <code>{term.pattern}</code> : term.pattern}
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="size-4"
+                  disabled={removeTerm.isPending}
+                  aria-label={t("dlp.terms.remove", { word: term.pattern })}
+                  onClick={() =>
+                    removeTerm.mutate(term.id, {
+                      onSuccess: startScan,
+                      onError: onActionError("dlp.terms.removeFailed"),
+                    })
+                  }
+                >
+                  <XIcon />
+                </Button>
+              </Badge>
+            </li>
+          ))}
+        </ul>
+        <form
+          onSubmit={submitWord}
+          className="flex flex-wrap items-center gap-x-3 gap-y-2"
+        >
+          <Label htmlFor="dlp-word" className="sr-only">
+            {t("dlp.terms.wordLabel")}
+          </Label>
+          <Input
+            id="dlp-word"
+            value={word}
+            maxLength={500}
+            placeholder={t("dlp.terms.wordPlaceholder")}
+            className="w-full sm:w-72"
+            onChange={(event) => setWord(event.currentTarget.value)}
+          />
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            disabled={!word.trim() || addTerm.isPending}
+          >
+            <PlusIcon data-icon="inline-start" />
+            {t("dlp.terms.add")}
+          </Button>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="dlp-word-regex"
+              checked={isRegex}
+              onCheckedChange={(checked) => setIsRegex(checked === true)}
+            />
+            <Label htmlFor="dlp-word-regex" className="font-normal">
+              {t("dlp.terms.regex")}
+            </Label>
+          </div>
+        </form>
+      </section>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          onClick={startScan}
+          disabled={scan.isPending || scanning}
+          aria-busy={scanning}
+          variant="outline"
+          size="sm"
+        >
+          {scanning && <Spinner data-icon="inline-start" aria-hidden="true" />}
+          {t(scanning ? "dlp.scanning" : "dlp.scan")}
+        </Button>
+        <Button
+          onClick={() => setConfirmingApply(true)}
+          disabled={acceptedCount === 0 || apply.isPending}
+          aria-busy={apply.isPending}
+          variant="destructive"
+          size="sm"
+        >
+          {apply.isPending && (
+            <Spinner data-icon="inline-start" aria-label={t("dlp.applying")} />
+          )}
+          {t("dlp.apply", { count: acceptedCount })}
+        </Button>
+        <span className="text-sm text-muted-foreground" aria-live="polite">
+          {scanned && !scanning && t("dlp.scanDone", { count: rows.length })}
+        </span>
       </div>
       <div>
         {/* Permanent polite region: the outcome is announced when it lands. */}
@@ -143,7 +261,7 @@ export function MeetingDlpPanel({
           onRetry={() => void findings.refetch()}
           isEmpty={rows.length === 0}
           emptyTitle={t("dlp.emptyTitle")}
-          emptyBody={t("dlp.emptyBody")}
+          emptyBody={t(scanned ? "dlp.emptyBodyScanned" : "dlp.emptyBody")}
           emptyIcon={ShieldAltIcon}
           headingLevel="h3"
         >
