@@ -7,6 +7,7 @@ per-turn pipeline also handles. No ASR model runs in the API process."""
 
 from __future__ import annotations
 
+import html
 import io
 import logging
 import time
@@ -135,7 +136,9 @@ def _parse_response(response: object) -> TranscriptionResult:
     Handles the SDK object, a dict, and the word-vs-segment-timestamp fallback.
     """
     data = response if isinstance(response, dict) else _to_dict(response)
-    text = str(data.get("text", "") or "")
+    # Some models were trained on subtitle text and answer in HTML entities
+    # ("Bok &amp; Demo"): the transcript is plain text.
+    text = html.unescape(str(data.get("text", "") or ""))
     language = data.get("language")
     duration = data.get("duration")
     words: list[Word] = []
@@ -145,7 +148,9 @@ def _parse_response(response: object) -> TranscriptionResult:
         end = _get(w, "end")
         if wt is None or start is None or end is None:
             continue
-        words.append(Word(text=str(wt), start=float(start), end=float(end)))
+        words.append(
+            Word(text=html.unescape(str(wt)), start=float(start), end=float(end))
+        )
     has_word_timestamps = bool(words)
     # Fallback: no word timestamps — use segment timestamps as coarse "words"
     # (flagged, so the worker can switch to per-turn transcription).
@@ -156,7 +161,9 @@ def _parse_response(response: object) -> TranscriptionResult:
             end = _get(seg, "end")
             if st is None or start is None or end is None:
                 continue
-            words.append(Word(text=str(st), start=float(start), end=float(end)))
+            words.append(
+                Word(text=html.unescape(str(st)), start=float(start), end=float(end))
+            )
     return TranscriptionResult(
         words=words,
         text=text,

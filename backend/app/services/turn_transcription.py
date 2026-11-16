@@ -167,6 +167,37 @@ def context_bounds(
     )
 
 
+def context_texts(
+    turns: Sequence[SpeakerTurn],
+    texts: Sequence[str],
+    index: int,
+    bounds: tuple[float, float],
+) -> tuple[str, str]:
+    """What is already known to be said around ``turns[index]``, for
+    :func:`rescue_text`: the texts of every turn that reaches into the
+    listening window ``bounds``, before and after. A few seconds of context
+    often hold two or three turns; taking out only the nearest one leaves the
+    others' words to be passed off as the empty turn's ("Jobba lite." twice).
+    With no turn in the window on a side, the nearest heard turn is used.
+    """
+    start, end = bounds
+    before = [texts[i] for i in range(index) if texts[i] and turns[i].end > start] or [
+        next((t for t in reversed(texts[:index]) if t), "")
+    ]
+    after = [
+        texts[i]
+        for i in range(index + 1, len(turns))
+        if texts[i] and turns[i].start < end
+    ] or [next((t for t in texts[index + 1 :] if t), "")]
+    return " ".join(before), " ".join(after)
+
+
+#: Punctuation closing a word ("vi." -> "."); always matches, maybe empty.
+_TAIL = re.compile(r"[^\w]*$", flags=re.UNICODE)
+#: A word's first letter.
+_LETTER = re.compile(r"[^\W\d_]", flags=re.UNICODE)
+
+
 def _key(word: str) -> str:
     return re.sub(r"[^\w]+", "", word, flags=re.UNICODE).casefold()
 
@@ -335,6 +366,33 @@ def fill_from_full_text(
                 return index
         return None
 
+    def adopt(flat_index: int, full_index: int, *, before: bool) -> None:
+        """Fit the word next to an insertion to the sentence as it now reads.
+
+        It is the same word in both transcripts, and the whole-file text has
+        the sentence with the inserted words in it. The word before them
+        takes its closing punctuation ("det gör vi." + "ju." is "det gör vi
+        ju.", not "det gör vi. ju."); the word after them takes its capital
+        or small first letter ("Och" + "Vi pratar" is "Och vi pratar")."""
+        if not (0 <= flat_index < len(flat) and 0 <= full_index < len(full)):
+            return
+        key, owner = flat[flat_index]
+        offset = sum(1 for _word, other in flat[:flat_index] if other == owner)
+        theirs = full[full_index]
+        if offset >= len(words[owner]) or _key(theirs) != key:
+            return
+        mine = words[owner][offset]
+        if _key(mine) != key:
+            return
+        if before:
+            words[owner][offset] = _TAIL.sub("", mine) + _TAIL.search(theirs).group()
+            return
+        at, theirs_at = _LETTER.search(mine), _LETTER.search(theirs)
+        if at and theirs_at:
+            letter = mine[at.start()]
+            letter = letter.upper() if theirs_at.group().isupper() else letter.lower()
+            words[owner][offset] = mine[: at.start()] + letter + mine[at.end() :]
+
     added = 0
     # Back to front, so earlier positions stay valid while words are inserted.
     for tag, i1, _i2, j1, j2 in reversed(matcher.get_opcodes()):
@@ -365,6 +423,8 @@ def fill_from_full_text(
             # In the middle of a turn's own text.
             offset = sum(1 for _word, owner in flat[:i1] if owner == before)
             if fits(before, len(run)) is not None:
+                adopt(i1 - 1, j1 - 1, before=True)
+                adopt(i1, j2, before=False)
                 words[before][offset:offset] = run
                 added += 1
             continue
@@ -378,8 +438,10 @@ def fill_from_full_text(
             continue
         _rate, target, place = min(options)
         if place == "start":
+            adopt(i1, j2, before=False)
             words[target][0:0] = run
         else:
+            adopt(i1 - 1, j1 - 1, before=True)
             words[target].extend(run)
         added += 1
     return [" ".join(turn) for turn in words], added

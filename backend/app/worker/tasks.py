@@ -721,8 +721,9 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                     "context.wav",
                     language=requested_language,
                 ).text
-                before = next((t for t in reversed(texts[:index]) if t), "")
-                after = next((t for t in texts[index + 1 :] if t), "")
+                before, after = turn_stt.context_texts(
+                    ordered, texts, index, (wide_start, wide_end)
+                )
                 found = turn_stt.rescue_text(heard, before, after, turn_seconds=length)
                 if found:
                     texts[index] = found

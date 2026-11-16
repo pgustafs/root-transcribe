@@ -396,6 +396,75 @@ def test_words_only_the_whole_file_text_has_are_put_back() -> None:
     assert filled[7].endswith("mellan Stockholm och Sälen med bil?")
 
 
+def test_words_put_back_read_as_one_sentence() -> None:
+    """The words next to an insertion are fitted to the sentence as it reads
+    with the insertion: not "det gör vi. ju." and not "Och Vi pratar"."""
+    from app.services.turn_transcription import fill_from_full_text
+
+    # B's turn is the roomier one, so words said between the two go to B.
+    turns = [SpeakerTurn("A", 0.0, 6.0), SpeakerTurn("B", 7.0, 19.0)]
+    texts = [
+        "Ja, men det gör vi. Så då blir den AI-stack.",
+        "Vi pratar suverän AI-plattform, för att diskutera. Den kan vara där.",
+    ]
+    full = (
+        "Ja, men det gör vi ju. Så då blir den AI-stack. Och vi pratar suverän "
+        "AI-plattform, för att diskutera lite. Den kan vara där."
+    )
+    filled, added = fill_from_full_text(full, turns, texts)
+    assert added == 3
+    # The full stop moves behind the word that was put back.
+    assert filled[0] == "Ja, men det gör vi ju. Så då blir den AI-stack."
+    # "Och" goes in front of B's turn: the old first word loses its capital.
+    assert filled[1] == (
+        "Och vi pratar suverän AI-plattform, för att diskutera lite. Den kan vara där."
+    )
+    # Only the two words next to an insertion are fitted: the turn's own
+    # spelling of everything else ("Ja,", "AI-stack.") is kept, also where
+    # the whole-file text differs.
+    kept, _ = fill_from_full_text(
+        "ja men det gör vi ju så då blir den ai-stack", turns[:1], texts[:1]
+    )
+    assert kept == ["Ja, men det gör vi ju så då blir den AI-stack."]
+
+
+def test_rescue_knows_every_turn_in_the_listening_window() -> None:
+    """A few seconds of context hold more than the nearest turn: all of them
+    are taken out, or an earlier turn's words come back as an echo."""
+    from app.services.turn_transcription import context_texts, rescue_text
+
+    turns = [
+        SpeakerTurn("A", 60.0, 62.0),  # outside the window
+        SpeakerTurn("A", 65.0, 74.8),  # "... komma hem och jobba lite."
+        SpeakerTurn("B", 74.9, 75.2),  # "Ja."
+        SpeakerTurn("A", 75.7, 76.0),  # came back empty
+        SpeakerTurn("B", 76.1, 82.0),
+        SpeakerTurn("A", 90.0, 91.0),  # outside the window
+    ]
+    texts = [
+        "Titta på att sitta hemma också.",
+        "Det var kul att komma hem och jobba lite.",
+        "Ja.",
+        "",
+        "Ifall du är okej med det så spelar jag in.",
+        "Jag är cool.",
+    ]
+    before, after = context_texts(turns, texts, 3, (73.2, 78.5))
+    assert before == "Det var kul att komma hem och jobba lite. Ja."
+    assert after == "Ifall du är okej med det så spelar jag in."
+    heard = "och jobba lite. Ja. Ifall du är okej med det"
+    # Nothing new was said in the empty turn...
+    assert rescue_text(heard, before, after, turn_seconds=0.3) == ""
+    # ...which taking out only the nearest turn ("Ja.") got wrong.
+    assert rescue_text(heard, "Ja.", after, turn_seconds=0.3) == "och jobba lite."
+    # No turn inside the window on a side: the nearest heard turn stands in.
+    assert context_texts(turns, texts, 3, (75.5, 76.05)) == (
+        "Ja.",
+        "Ifall du är okej med det så spelar jag in.",
+    )
+    assert context_texts(turns[3:4], [""], 0, (73.0, 78.0)) == ("", "")
+
+
 def test_whole_file_text_is_not_used_when_it_cannot_be_trusted() -> None:
     from app.services.turn_transcription import fill_from_full_text
 

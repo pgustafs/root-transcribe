@@ -43,6 +43,26 @@ def test_parse_falls_back_to_segments_without_words() -> None:
     assert result.has_word_timestamps is False
 
 
+def test_parse_decodes_html_entities() -> None:
+    """Some models answer in HTML entities ("Bok &amp; Demo"); the transcript
+    is plain text, whichever fields the server returns."""
+    result = _parse_response(
+        {
+            "text": "Bok &amp; Demo &lt;nu&gt;",
+            "words": [
+                {"word": "Bok", "start": 0.0, "end": 0.3},
+                {"word": "&amp;", "start": 0.3, "end": 0.4},
+            ],
+        }
+    )
+    assert result.text == "Bok & Demo <nu>"
+    assert [w.text for w in result.words] == ["Bok", "&"]
+    segments = _parse_response(
+        {"text": "", "segments": [{"text": "R&amp;D", "start": 0.0, "end": 1.0}]}
+    )
+    assert [w.text for w in segments.words] == ["R&D"]
+
+
 def test_parse_tolerates_missing_fields() -> None:
     result = _parse_response({"text": "x"})
     assert result.words == []
