@@ -206,6 +206,23 @@ def _words(text: str) -> list[str]:
     return [word for word in text.split() if _key(word)]
 
 
+def _tokens(text: str) -> list[str]:
+    """The words of ``text`` for rebuilding it: a symbol standing alone ("&",
+    "-") is no word of its own but stays with the word before it (the word
+    after it at the start), so "Bok & Demo" is not rebuilt as "Bok Demo"."""
+    tokens: list[str] = []
+    lead = ""
+    for part in text.split():
+        if _key(part):
+            tokens.append(f"{lead}{part}")
+            lead = ""
+        elif tokens:
+            tokens[-1] = f"{tokens[-1]} {part}"
+        else:
+            lead = f"{lead}{part} "
+    return tokens
+
+
 def piece_runs(
     turns: Sequence[SpeakerTurn],
     texts: Sequence[str],
@@ -333,11 +350,11 @@ def fill_from_full_text(
     additions are taken. Nothing is done when the transcripts do not broadly
     agree. Returns the completed texts and how many runs were put back.
     """
-    words: list[list[str]] = [_words(text) for text in texts]
+    words: list[list[str]] = [_tokens(text) for text in texts]
     flat: list[tuple[str, int]] = [
         (_key(word), index) for index, turn in enumerate(words) for word in turn
     ]
-    full = _words(full_text)
+    full = _tokens(full_text)
     if not flat or not full:
         return list(texts), 0
     matcher = SequenceMatcher(

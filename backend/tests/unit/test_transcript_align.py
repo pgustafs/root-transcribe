@@ -428,6 +428,26 @@ def test_words_put_back_read_as_one_sentence() -> None:
     assert kept == ["Ja, men det gör vi ju så då blir den AI-stack."]
 
 
+def test_symbols_standing_alone_survive_the_put_back() -> None:
+    """Lines are rebuilt from their words when something is put back; a
+    lone "&" or dash is not a word but must stay where it was."""
+    from app.services.turn_transcription import fill_from_full_text
+
+    turns = [SpeakerTurn("A", 0.0, 8.0)]
+    filled, added = fill_from_full_text(
+        "ska vi ha kvar Bok & Demo och läsa om plattformen eller",
+        turns,
+        ["- Ska vi ha kvar Bok & Demo och läsa om plattformen"],
+    )
+    assert added == 1
+    assert filled == ["- Ska vi ha kvar Bok & Demo och läsa om plattformen eller"]
+    # Also inside the words that are put back.
+    filled, _ = fill_from_full_text(
+        "Vi har frågor & svar på sidan nu", turns, ["Vi har frågor på sidan nu"]
+    )
+    assert filled == ["Vi har frågor & svar på sidan nu"]
+
+
 def test_rescue_knows_every_turn_in_the_listening_window() -> None:
     """A few seconds of context hold more than the nearest turn: all of them
     are taken out, or an earlier turn's words come back as an echo."""
