@@ -95,6 +95,8 @@ export type StartRecordingOptions = {
   includeTabAudio: boolean;
   consent: boolean;
   requestedLanguage?: RecordingLanguage;
+  /** How many people speak; null/undefined lets speaker detection decide. */
+  expectedSpeakers?: number | null;
   /** Specific input device (from listAudioInputs), default mic otherwise. */
   deviceId?: string;
   /** Called with the created recording id once the upload is accepted. */
@@ -558,6 +560,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
           title: opts.title,
           consent: opts.consent,
           requestedLanguage: opts.requestedLanguage ?? "auto",
+          expectedSpeakers: opts.expectedSpeakers ?? null,
           // Provisional; the recorder reports the container it actually chose
           // via onStart below, before any chunk lands (issue #37 review).
           mimeType: "audio/webm",
@@ -673,6 +676,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       title: string;
       consent: boolean;
       requestedLanguage?: RecordingLanguage;
+      expectedSpeakers?: number | null;
       blob: Blob;
       filename: string;
       resumeFrom?: StoredRecordingSession;
@@ -733,6 +737,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
           title: args.title,
           consent: args.consent,
           requestedLanguage: args.requestedLanguage ?? "auto",
+          expectedSpeakers: args.expectedSpeakers ?? null,
           signal: controller.signal,
           resume,
           // Returned (not fire-and-forget) so the manager AWAITS persistence:
@@ -962,6 +967,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       title: target.title,
       consent: target.consent,
       requestedLanguage: target.requestedLanguage ?? "auto",
+      expectedSpeakers: target.expectedSpeakers ?? null,
       blob,
       filename: `meeting.${extFromMime(mimeType)}`,
       onUploaded: target.onUploaded,
@@ -1021,6 +1027,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       title: target.title,
       consent: target.consent,
       requestedLanguage: target.requestedLanguage ?? "auto",
+      expectedSpeakers: target.expectedSpeakers ?? null,
       blob,
       filename: `meeting.${extFromMime(stored.mimeType)}`,
       resumeFrom: stored,
@@ -1171,6 +1178,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         includeTabAudio: false,
         consent: stored.consent,
         requestedLanguage: stored.requestedLanguage ?? "auto",
+        expectedSpeakers: stored.expectedSpeakers ?? null,
       };
       // Integrity BEFORE the empty check: a session whose chunk writes were all
       // lost has 0 bytes but a non-empty `missing` list, and must be reported —
@@ -1224,6 +1232,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         title: stored.title,
         consent: stored.consent,
         requestedLanguage: stored.requestedLanguage ?? "auto",
+        expectedSpeakers: stored.expectedSpeakers ?? null,
         blob,
         filename: `meeting.${extFromMime(stored.mimeType)}`,
         resumeFrom: stored,

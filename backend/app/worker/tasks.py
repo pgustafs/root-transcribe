@@ -459,6 +459,7 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
         requested_language = (
             None if rec.requested_language == "auto" else rec.requested_language
         )
+        expected_speakers = rec.expected_speakers
         # Safe operator diagnostics for a failure (issue #37): media type + byte
         # size — never audio bytes, titles, or object keys.
         size_bytes = rec.size_bytes
@@ -575,7 +576,9 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
 
         # 1. Diarization first — its turns are the backbone of attribution.
         _step("diarizing", "diarize")
-        turns = get_diarization_service().diarize_sync(waveform)
+        turns = get_diarization_service().diarize_sync(
+            waveform, num_speakers=expected_speakers
+        )
 
         # 2+3. Speech-to-text + attribution — adaptively.
         service = get_transcription_service()

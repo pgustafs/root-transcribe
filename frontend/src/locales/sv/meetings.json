@@ -428,6 +428,16 @@
     "sv": "Svenska",
     "help": "Välj det talade språket för att undvika felaktig språkidentifiering. Automatiskt identifierar språket åt dig."
   },
+  "recordingSpeakers": {
+    "label": "Antal talare",
+    "auto": "Automatiskt",
+    "count_one": "{{count}} person",
+    "count_other": "{{count}} personer",
+    "help": "Välj antalet om du vet hur många som pratar: automatisk identifiering kan lägga till en talare som inte finns.",
+    "retryTitle": "Transkribera igen",
+    "retryHint": "En ny version av transkriptet skapas; den nuvarande sparas.",
+    "retryConfirm": "Transkribera igen"
+  },
   "speakerNames": {
     "title": "Talare",
     "hint": "Ge varje röst ett namn. Namnen gäller bara den här inspelningen och används i transkriptet, exporter och nya anteckningar.",

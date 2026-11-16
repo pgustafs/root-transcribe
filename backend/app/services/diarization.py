@@ -197,11 +197,18 @@ class DiarizationService:
                 self._pipeline = pipeline
         return self._pipeline
 
-    def diarize_sync(self, audio: dict) -> list[SpeakerTurn]:
-        """Return chronologically-sorted speaker turns for a loaded waveform dict."""
+    def diarize_sync(
+        self, audio: dict, *, num_speakers: int | None = None
+    ) -> list[SpeakerTurn]:
+        """Return chronologically-sorted speaker turns for a loaded waveform dict.
+
+        ``num_speakers``: how many people speak, when the user knows it. Left
+        out, the pipeline estimates the count, and a wrong estimate invents a
+        speaker out of quiet, distant or overlapping speech."""
         pipeline = self._load()
-        with log_operation(logger, "diarization.run"):
-            output = pipeline(audio)
+        options = {"num_speakers": num_speakers} if num_speakers else {}
+        with log_operation(logger, "diarization.run", num_speakers=num_speakers):
+            output = pipeline(audio, **options)
         # pyannote 4.x community pipelines return a ``DiarizeOutput`` wrapper;
         # older pipelines return the ``Annotation`` directly. Prefer the wrapper's
         # EXCLUSIVE diarization (one speaker at a time): the regular one allows

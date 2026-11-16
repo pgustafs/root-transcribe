@@ -124,6 +124,8 @@ export async function createRecording(
     title: string;
     consent: boolean;
     requestedLanguage?: RecordingLanguage;
+    /** How many people speak; null/undefined lets speaker detection decide. */
+    expectedSpeakers?: number | null;
     /** Same closed-token context the resumable path sends (issue #37 r8), so a
      * picker upload the worker later rejects still carries attribution. */
     clientDiagnostics?: MeetingClientDiagnostics;
@@ -134,6 +136,8 @@ export async function createRecording(
   form.append("title", input.title);
   form.append("participant_consent", String(input.consent));
   form.append("requested_language", input.requestedLanguage ?? "auto");
+  if (input.expectedSpeakers)
+    form.append("expected_speakers", String(input.expectedSpeakers));
   if (input.clientDiagnostics)
     form.append("client_diagnostics", JSON.stringify(input.clientDiagnostics));
   // Clear the JSON default so the platform sets multipart/form-data + boundary.
@@ -148,9 +152,16 @@ export async function createRecording(
 export async function retryRecording(
   workspaceId: string,
   recordingId: string,
+  /** Change how many people speak (null: detect); left out, it is kept. */
+  options?: { expectedSpeakers?: number | null },
 ): Promise<MeetingRecording> {
+  const body =
+    options && "expectedSpeakers" in options
+      ? { expected_speakers: options.expectedSpeakers ?? null }
+      : undefined;
   const { data } = await apiClient.post<MeetingRecording>(
     `/workspaces/${workspaceId}/recordings/${recordingId}/retry`,
+    body,
   );
   return data;
 }
@@ -284,6 +295,7 @@ export async function createUploadSession(
     size_bytes?: number;
     participant_consent: boolean;
     requested_language?: RecordingLanguage;
+    expected_speakers?: number | null;
   },
 ): Promise<MeetingUploadSession> {
   const { data } = await apiClient.post<MeetingUploadSession>(

@@ -74,6 +74,8 @@ from app.db.session import SessionDep
 from app.models.meeting_recording import MeetingRecording
 from app.models.workspace import Workspace
 from app.schemas.meeting import (
+    MAX_SPEAKERS,
+    MIN_SPEAKERS,
     DlpFindingPublic,
     DlpFindingStatusSet,
     DlpManualFinding,
@@ -92,6 +94,7 @@ from app.schemas.meeting import (
     MeetingPermissionsPublic,
     MeetingRecordingDetail,
     MeetingRecordingPublic,
+    MeetingRetry,
     MeetingRevisionApprove,
     MeetingRevisionPublic,
     MeetingSegmentPublic,
@@ -392,6 +395,9 @@ async def create_recording(
     title: Annotated[str, Form()],
     participant_consent: Annotated[bool, Form()] = False,
     requested_language: Annotated[RecordingLanguage, Form()] = "auto",
+    expected_speakers: Annotated[
+        int | None, Form(ge=MIN_SPEAKERS, le=MAX_SPEAKERS)
+    ] = None,
     # Same privacy-safe recorder context the resumable path sends, as a JSON
     # form field (issue #37 r8) — otherwise a picker upload that the worker
     # later rejects would carry no client attribution at all.
@@ -471,6 +477,7 @@ async def create_recording(
         size_bytes=size,
         participant_consent=participant_consent,
         requested_language=requested_language,
+        expected_speakers=expected_speakers,
         actor=user,
         commit=False,
     )
@@ -1027,8 +1034,12 @@ async def retry_recording(
     recording_id: uuid.UUID,
     session: SessionDep,
     user: CurrentUserDep,
+    payload: MeetingRetry | None = None,
 ) -> MeetingRecordingPublic:
     """Re-run transcription for a terminal recording (audio still present).
+
+    ``expected_speakers`` in the body changes how many people speech
+    detection looks for (null: detect); left out, the stored choice is kept.
 
     Safe for completed recordings since transcript revisions (issue #6): the
     rerun persists a NEW machine_candidate revision, carries human edits
@@ -1056,6 +1067,8 @@ async def retry_recording(
             "This recording can't be transcribed and retrying it won't help — "
             "please make a new recording."
         )
+    if payload is not None and "expected_speakers" in payload.model_fields_set:
+        rec.expected_speakers = payload.expected_speakers
     rec.status = "pending"
     rec.error = None
     rec.error_code = None
@@ -1068,7 +1081,11 @@ async def retry_recording(
             session,
             recording_id=rec.id,
             actor=user,
-            config={"filename": f"recording.{ext}"},
+            # Which speaker count produced this attempt's revision.
+            config={
+                "filename": f"recording.{ext}",
+                "expected_speakers": rec.expected_speakers,
+            },
         )
         outbox = await task_outbox_crud.enqueue(
             session,
@@ -1526,6 +1543,7 @@ async def create_upload_session(
         size_bytes=payload.size_bytes or 0,
         participant_consent=payload.participant_consent,
         requested_language=payload.requested_language,
+        expected_speakers=payload.expected_speakers,
         actor=user,
         commit=False,
     )

@@ -14,6 +14,11 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 RecordingLanguage = Literal["auto", "en", "sv"]
+#: How many people speak in a recording, when the user knows it; None lets
+#: speaker detection decide.
+MIN_SPEAKERS = 1
+MAX_SPEAKERS = 10
+ExpectedSpeakers = Annotated[int, Field(ge=MIN_SPEAKERS, le=MAX_SPEAKERS)] | None
 
 
 class MeetingRecordingPublic(BaseModel):
@@ -28,6 +33,7 @@ class MeetingRecordingPublic(BaseModel):
     current_step: str | None = None
     duration_seconds: float | None = None
     requested_language: RecordingLanguage = "auto"
+    expected_speakers: ExpectedSpeakers = None
     language: str | None = None
     size_bytes: int | None = None
     # ``error`` is a safe, user-facing message; ``error_code`` is the stable
@@ -165,12 +171,20 @@ class SpeakerSuggestionPublic(BaseModel):
     created_at: datetime
 
 
+class MeetingRetry(BaseModel):
+    """Optional changes for a re-run. ``expected_speakers`` left out keeps the
+    recording's choice; null switches back to detecting the count."""
+
+    expected_speakers: ExpectedSpeakers = None
+
+
 class MeetingUploadSessionCreate(BaseModel):
     """Open a resumable multipart upload session (issue #6)."""
 
     title: str = Field(min_length=1, max_length=512)
     filename: str = Field(min_length=1, max_length=255)
     requested_language: RecordingLanguage = "auto"
+    expected_speakers: ExpectedSpeakers = None
     content_type: str | None = Field(default=None, max_length=100)
     # Declared total size (may be unknown for live recordings) — bounded by
     # AUDIO_MAX_BYTES at completion either way.

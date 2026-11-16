@@ -1,5 +1,6 @@
 import type { RecordingLanguage } from "@/api/types";
 import { RecordingLanguageField } from "@/components/recording/RecordingLanguageField";
+import { RecordingSpeakersField } from "@/components/recording/RecordingSpeakersField";
 import {
   DialogHeader,
   DialogTitle,
@@ -88,6 +89,7 @@ export function RecordMeetingModal({
   const [title, setTitle] = useState("");
   const [requestedLanguage, setRequestedLanguage] =
     useState<RecordingLanguage>("auto");
+  const [expectedSpeakers, setExpectedSpeakers] = useState<number | null>(null);
   const [includeTab, setIncludeTab] = useState(false);
   const [consent, setConsent] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -179,6 +181,7 @@ export function RecordMeetingModal({
         includeTabAudio: includeTab,
         consent,
         requestedLanguage,
+        expectedSpeakers,
         deviceId: deviceId || undefined,
         onUploaded,
       });
@@ -186,6 +189,7 @@ export function RecordMeetingModal({
       // insecure-context failure keeps the dialog open with the error shown.
       if (ok) {
         setTitle("");
+        setExpectedSpeakers(null);
         setIncludeTab(false);
         setConsent(false);
         setStudyOn(false);
@@ -260,6 +264,10 @@ export function RecordMeetingModal({
               <RecordingLanguageField
                 value={requestedLanguage}
                 onChange={setRequestedLanguage}
+              />
+              <RecordingSpeakersField
+                value={expectedSpeakers}
+                onChange={setExpectedSpeakers}
               />
               {devices.length > 0 && (
                 <Field>

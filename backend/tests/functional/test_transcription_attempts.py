@@ -129,3 +129,74 @@ async def test_retry_creates_second_attempt_with_outbox(
     assert attempts[1].config["filename"].endswith(".webm")
     outboxes = (await db_session.execute(select(TaskOutbox))).scalars().all()
     assert len(outboxes) == 2
+
+
+async def test_retry_can_change_the_number_of_speakers(
+    client: AsyncClient,
+    user_token_headers: dict[str, str],
+    meetings_enabled: _FakeAudioStore,
+    db_session: AsyncSession,
+) -> None:
+    """Speaker detection invented a third person: the user says how many
+    people spoke and transcribes again. Left out, the choice is kept; null
+    goes back to detecting the count."""
+    from app.models.meeting_recording import MeetingRecording
+
+    wid = await _make_workspace(client, user_token_headers)
+    rec = await _create_recording(client, user_token_headers, wid)
+    url = f"{API}/workspaces/{wid}/recordings/{rec['id']}/retry"
+
+    async def finish_attempts() -> None:
+        for attempt in (
+            (await db_session.execute(select(MeetingTranscriptionAttempt)))
+            .scalars()
+            .all()
+        ):
+            attempt.status = "completed"
+        row = await db_session.get(MeetingRecording, uuid.UUID(rec["id"]))
+        row.status = "completed"
+        await db_session.commit()
+
+    async def last_config() -> dict:
+        db_session.expire_all()
+        attempts = (
+            (
+                await db_session.execute(
+                    select(MeetingTranscriptionAttempt).order_by(
+                        MeetingTranscriptionAttempt.attempt_number
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return attempts[-1].config
+
+    await finish_attempts()
+    changed = await client.post(
+        url, headers=user_token_headers, json={"expected_speakers": 2}
+    )
+    assert changed.status_code == 202, changed.text
+    assert changed.json()["expected_speakers"] == 2
+    assert (await last_config())["expected_speakers"] == 2
+
+    # No body: the stored choice is used again.
+    await finish_attempts()
+    kept = await client.post(url, headers=user_token_headers)
+    assert kept.status_code == 202, kept.text
+    assert kept.json()["expected_speakers"] == 2
+
+    # Null: back to detecting the count.
+    await finish_attempts()
+    auto = await client.post(
+        url, headers=user_token_headers, json={"expected_speakers": None}
+    )
+    assert auto.status_code == 202, auto.text
+    assert auto.json()["expected_speakers"] is None
+    assert (await last_config())["expected_speakers"] is None
+
+    await finish_attempts()
+    bad = await client.post(
+        url, headers=user_token_headers, json={"expected_speakers": 0}
+    )
+    assert bad.status_code == 422

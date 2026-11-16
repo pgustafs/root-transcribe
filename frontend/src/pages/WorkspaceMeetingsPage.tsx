@@ -1,5 +1,6 @@
 import type { RecordingLanguage } from "@/api/types";
 import { RecordingLanguageField } from "@/components/recording/RecordingLanguageField";
+import { RecordingSpeakersField } from "@/components/recording/RecordingSpeakersField";
 import { FieldGroup } from "@/components/ui/field";
 import {
   MicIcon as MicrophoneIcon,
@@ -283,6 +284,9 @@ export function WorkspaceMeetingsPage() {
   );
   const [recordOpen, setRecordOpen] = useState(false);
   const [deleting, setDeleting] = useState<MeetingRecording | null>(null);
+  // Retry asks how many people speak (pre-filled with the current choice).
+  const [retrying, setRetrying] = useState<MeetingRecording | null>(null);
+  const [retrySpeakers, setRetrySpeakers] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const toast = useToast();
@@ -342,6 +346,7 @@ export function WorkspaceMeetingsPage() {
   const [attestConsent, setAttestConsent] = useState(false);
   const [uploadLanguage, setUploadLanguage] =
     useState<RecordingLanguage>("auto");
+  const [uploadSpeakers, setUploadSpeakers] = useState<number | null>(null);
   const consentRequired = config.data?.meeting_consent_required ?? false;
 
   const uploadFile = async (file: File, consent: boolean) => {
@@ -385,6 +390,7 @@ export function WorkspaceMeetingsPage() {
         title: file.name.replace(/\.[^.]+$/, ""),
         consent,
         requestedLanguage: uploadLanguage,
+        expectedSpeakers: uploadSpeakers,
         // A picker upload the worker later rejects still carries attribution
         // (issue #37 r8) — closed tokens only, same as the recorder path.
         clientDiagnostics: {
@@ -415,12 +421,23 @@ export function WorkspaceMeetingsPage() {
   });
 
   const retryRecording = (r: MeetingRecording) => {
+    setRetrySpeakers(r.expected_speakers ?? null);
+    setRetrying(r);
+  };
+
+  const confirmRetry = () => {
+    const r = retrying;
+    if (!r) return;
+    setRetrying(null);
     setActionError(null);
-    retry.mutate(r.id, {
-      onSuccess: () => toast.success(t("toast.retried", { name: r.title })),
-      onError: (error) =>
-        setActionError(getErrorMessage(error, t("errors.retry"))),
-    });
+    retry.mutate(
+      { recordingId: r.id, expectedSpeakers: retrySpeakers },
+      {
+        onSuccess: () => toast.success(t("toast.retried", { name: r.title })),
+        onError: (error) =>
+          setActionError(getErrorMessage(error, t("errors.retry"))),
+      },
+    );
   };
 
   const confirmDelete = () => {
@@ -838,6 +855,10 @@ export function WorkspaceMeetingsPage() {
                   value={uploadLanguage}
                   onChange={setUploadLanguage}
                 />
+                <RecordingSpeakersField
+                  value={uploadSpeakers}
+                  onChange={setUploadSpeakers}
+                />
                 {consentRequired && (
                   <Field orientation="horizontal">
                     <Checkbox
@@ -880,6 +901,48 @@ export function WorkspaceMeetingsPage() {
                 }}
                 variant="link"
               >
+                {t("common:actions.cancel")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {retrying && (
+        <Dialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setRetrying(null);
+          }}
+        >
+          <DialogContent
+            aria-labelledby="retry-title"
+            aria-describedby="retry-body"
+          >
+            <DialogHeader>
+              <DialogTitle id="retry-title">
+                {t("recordingSpeakers.retryTitle")}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="min-w-0">
+              <FieldGroup>
+                <p id="retry-body" className="app-copy break-words">
+                  {t("recordingSpeakers.retryHint")}
+                </p>
+                <RecordingSpeakersField
+                  value={retrySpeakers}
+                  onChange={setRetrySpeakers}
+                />
+              </FieldGroup>
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={confirmRetry}
+                disabled={retry.isPending}
+                variant="default"
+              >
+                {t("recordingSpeakers.retryConfirm")}
+              </Button>
+              <Button onClick={() => setRetrying(null)} variant="link">
                 {t("common:actions.cancel")}
               </Button>
             </DialogFooter>

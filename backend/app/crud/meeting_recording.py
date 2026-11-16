@@ -35,6 +35,7 @@ async def create(
     participant_consent: bool,
     actor: User,
     requested_language: str = "auto",
+    expected_speakers: int | None = None,
     commit: bool = True,
 ) -> MeetingRecording:
     """Create a ``pending`` recording attributed to ``actor``.
@@ -51,6 +52,7 @@ async def create(
         size_bytes=size_bytes,
         participant_consent=participant_consent,
         requested_language=requested_language,
+        expected_speakers=expected_speakers,
         created_by_id=actor.id,
         created_by_email=actor.email,
     )

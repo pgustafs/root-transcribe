@@ -2587,3 +2587,45 @@ async def test_recording_language_persisted_and_validated(
         f"{API}/workspaces/{wid}/recordings/{rid}", headers=user_token_headers
     )
     assert detail.json()["requested_language"] == (requested_language or "auto")
+
+
+@pytest.mark.parametrize("expected_speakers", [None, 2, 10, 0, 11])
+@pytest.mark.parametrize("resumable", [False, True])
+async def test_expected_speakers_persisted_and_validated(
+    client,
+    user_token_headers,
+    meetings_enabled,
+    db_session,
+    expected_speakers,
+    resumable,
+):
+    wid = await _make_workspace(client, user_token_headers)
+    data = {"title": "Two of us", "participant_consent": True}
+    if expected_speakers is not None:
+        data["expected_speakers"] = expected_speakers
+    if resumable:
+        response = await client.post(
+            f"{API}/workspaces/{wid}/meetings/uploads",
+            headers=user_token_headers,
+            json={**data, "filename": "m.webm"},
+        )
+    else:
+        response = await client.post(
+            f"{API}/workspaces/{wid}/recordings",
+            headers=user_token_headers,
+            data=data,
+            files={"file": ("m.webm", b"fake-audio-bytes", "audio/webm")},
+        )
+    if expected_speakers in (0, 11):
+        assert response.status_code == 422
+        assert not meetings_enabled.blobs
+        assert not meetings_enabled.multiparts
+        return
+    assert response.status_code == (201 if resumable else 202), response.text
+    rid = response.json()["recording_id" if resumable else "id"]
+    recording = await db_session.get(MeetingRecording, uuid.UUID(rid))
+    assert recording.expected_speakers == expected_speakers
+    detail = await client.get(
+        f"{API}/workspaces/{wid}/recordings/{rid}", headers=user_token_headers
+    )
+    assert detail.json()["expected_speakers"] == expected_speakers

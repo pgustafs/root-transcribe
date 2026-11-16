@@ -70,6 +70,7 @@ export async function uploadRecording(options: {
   title: string;
   consent: boolean;
   requestedLanguage?: RecordingLanguage;
+  expectedSpeakers?: number | null;
   signal?: AbortSignal;
   resume?: ResumeInfo;
   /**
@@ -99,6 +100,7 @@ export async function uploadRecording(options: {
       size_bytes: blob.size,
       participant_consent: options.consent,
       requested_language: options.requestedLanguage ?? "auto",
+      expected_speakers: options.expectedSpeakers ?? null,
     });
     session = {
       uploadSessionId: created.id,

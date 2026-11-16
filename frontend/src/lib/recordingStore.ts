@@ -30,6 +30,7 @@ export type StoredRecordingSession = {
   title: string;
   consent: boolean;
   requestedLanguage?: RecordingLanguage;
+  expectedSpeakers?: number | null;
   mimeType: string;
   state: StoredRecordingState;
   /** Resumable-upload bookkeeping (set once the upload session opens). */
@@ -388,6 +389,7 @@ export async function createStoredSession(meta: {
   title: string;
   consent: boolean;
   requestedLanguage?: RecordingLanguage;
+  expectedSpeakers?: number | null;
   mimeType: string;
   clientFamily?: string | null;
   clientMajor?: number | null;
@@ -403,6 +405,7 @@ export async function createStoredSession(meta: {
     title: meta.title,
     consent: meta.consent,
     requestedLanguage: meta.requestedLanguage ?? "auto",
+    expectedSpeakers: meta.expectedSpeakers ?? null,
     mimeType: meta.mimeType,
     clientFamily: meta.clientFamily ?? null,
     clientMajor: meta.clientMajor ?? null,

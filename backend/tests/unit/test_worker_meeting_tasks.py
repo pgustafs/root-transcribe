@@ -55,11 +55,18 @@ def _wire_pipeline(
     turns: list[SpeakerTurn],
     content_type: str = "audio/webm",
     requested_language: str = "auto",
+    expected_speakers: int | None = None,
     speaker_embeddings: dict[str, list[float]] | None = None,
     voiceprints: list | None = None,
 ):
     """Stub every boundary of ``transcribe_attempt``; returns a call recorder."""
-    calls: dict = {"status": [], "finish": [], "segments": None, "activity": []}
+    calls: dict = {
+        "status": [],
+        "finish": [],
+        "segments": None,
+        "activity": [],
+        "num_speakers": [],
+    }
     wav_path = _tmp_wav()
 
     monkeypatch.setattr(
@@ -86,7 +93,11 @@ def _wire_pipeline(
     )
     monkeypatch.setattr(
         "app.services.diarization.get_diarization_service",
-        lambda: SimpleNamespace(diarize_sync=lambda audio: turns),
+        lambda: SimpleNamespace(
+            diarize_sync=lambda audio, num_speakers=None: (
+                calls["num_speakers"].append(num_speakers) or turns
+            )
+        ),
     )
     monkeypatch.setattr(
         "app.services.diarization.get_embedding_service",
@@ -163,6 +174,7 @@ def _wire_pipeline(
             size_bytes=1024,
             audio_content_type=content_type,
             requested_language=requested_language,
+            expected_speakers=expected_speakers,
             # Recorder context the client shipped with the upload (issue #37 r7);
             # the worker attaches it to any media rejection it emits.
             client_diagnostics={"browser_family": "Chrome", "container": "webm"},
@@ -396,6 +408,25 @@ def test_transcribe_attempt_per_turn_fallback_without_word_timestamps(
     # midpoint to the next turn and never before the start of the recording.
     assert segs[0]["text"] == "turn-text-0.0-9.7"
     assert segs[1]["text"] == "turn-text-9.8-19.7"
+
+
+@pytest.mark.parametrize("expected", [None, 2])
+def test_speaker_detection_gets_the_number_of_speakers_the_user_gave(
+    monkeypatch: pytest.MonkeyPatch, expected: int | None
+) -> None:
+    """A wrong automatic count invents a speaker out of quiet or overlapping
+    speech: when the user says how many people speak, detection is told."""
+    stt = SimpleNamespace(
+        words=[], text="", language="sv", duration=20.0, has_word_timestamps=False
+    )
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=stt,
+        turns=[SpeakerTurn("SPEAKER_00", 0.0, 9.5)],
+        expected_speakers=expected,
+    )
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+    assert calls["num_speakers"] == [expected]
 
 
 def test_transcribe_attempt_skips_full_pass_for_large_audio(

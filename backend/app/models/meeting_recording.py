@@ -66,6 +66,10 @@ class MeetingRecording(Base):
     requested_language: Mapped[str] = mapped_column(
         String(8), default="auto", server_default="auto", nullable=False
     )
+    # How many people speak, when the user knows it (1-10); NULL lets speaker
+    # detection decide. A wrong automatic count invents a speaker out of quiet
+    # or overlapping speech, or merges two people.
+    expected_speakers: Mapped[int | None] = mapped_column(Integer, nullable=True)
     language: Mapped[str | None] = mapped_column(String(16), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

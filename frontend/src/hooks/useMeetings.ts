@@ -74,6 +74,7 @@ export function useCreateRecording(workspaceId: string) {
       title: string;
       consent: boolean;
       requestedLanguage?: RecordingLanguage;
+      expectedSpeakers?: number | null;
       clientDiagnostics?: meetingsApi.MeetingClientDiagnostics;
     }) => meetingsApi.createRecording(workspaceId, input),
     onSuccess: () =>
@@ -84,8 +85,14 @@ export function useCreateRecording(workspaceId: string) {
 export function useRetryRecording(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (recordingId: string) =>
-      meetingsApi.retryRecording(workspaceId, recordingId),
+    mutationFn: (
+      input: string | { recordingId: string; expectedSpeakers: number | null },
+    ) =>
+      typeof input === "string"
+        ? meetingsApi.retryRecording(workspaceId, input)
+        : meetingsApi.retryRecording(workspaceId, input.recordingId, {
+            expectedSpeakers: input.expectedSpeakers,
+          }),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: meetingKeys.list(workspaceId) }),
   });

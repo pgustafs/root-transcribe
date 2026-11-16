@@ -125,6 +125,8 @@ export type MeetingRecording = {
   current_step: string | null;
   duration_seconds: number | null;
   requested_language?: RecordingLanguage;
+  /** How many people speak, when the user said so; null: detected. */
+  expected_speakers?: number | null;
   language: string | null;
   size_bytes: number | null;
   /**

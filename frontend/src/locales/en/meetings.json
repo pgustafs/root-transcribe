@@ -428,6 +428,16 @@
     "sv": "Swedish",
     "help": "Choose the spoken language to avoid incorrect detection. Auto detects it for you."
   },
+  "recordingSpeakers": {
+    "label": "Number of speakers",
+    "auto": "Auto",
+    "count_one": "{{count}} person",
+    "count_other": "{{count}} people",
+    "help": "If you know how many people speak, choose it: automatic detection can add a speaker who isn't there.",
+    "retryTitle": "Transcribe again",
+    "retryHint": "A new version of the transcript is made; the current one is kept.",
+    "retryConfirm": "Transcribe again"
+  },
   "speakerNames": {
     "title": "Speakers",
     "hint": "Give each voice a name. The names apply to this recording only and are used in the transcript, exports and new notes.",

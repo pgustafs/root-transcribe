@@ -141,6 +141,19 @@ def test_diarization_prefers_exclusive_turns() -> None:
     service._pipeline = lambda audio: annotation((1.0, 2.0, "SPEAKER_00"))
     assert service.diarize_sync({}) == [SpeakerTurn("SPEAKER_00", 1.0, 2.0)]
 
+    # The number of speakers, when known, goes to the pipeline; otherwise the
+    # pipeline is called exactly as before and estimates it.
+    seen: list[dict] = []
+
+    def pipeline(audio, **options):
+        seen.append(options)
+        return annotation((1.0, 2.0, "SPEAKER_00"))
+
+    service._pipeline = pipeline
+    service.diarize_sync({}, num_speakers=2)
+    service.diarize_sync({})
+    assert seen == [{"num_speakers": 2}, {}]
+
 
 # --- cutting and rescuing speaker turns ------------------------------------------
 
