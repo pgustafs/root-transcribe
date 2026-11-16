@@ -48,6 +48,7 @@ from app.models.study import (
     StudySession,  # noqa: F401
 )
 from app.models.task_outbox import TaskOutbox  # noqa: F401
+from app.models.transcript_cleanup import TranscriptCleanup  # noqa: F401
 from app.models.user import (
     Role,  # noqa: F401
     User,  # noqa: F401

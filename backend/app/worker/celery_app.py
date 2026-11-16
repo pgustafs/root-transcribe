@@ -53,7 +53,7 @@ celery_app = Celery(
     "app",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.worker.tasks"],
+    include=["app.worker.tasks", "app.worker.cleanup_tasks"],
     task_cls=ContextTask,
 )
 

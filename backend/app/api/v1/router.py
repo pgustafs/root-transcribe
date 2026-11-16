@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.routes import (
+    cleanup,
     jobs,
     meetings,
     meta,
@@ -21,6 +22,7 @@ for module in (
     workspaces,
     meetings,
     notes,
+    cleanup,
     study,
     speakers,
     notifications,
