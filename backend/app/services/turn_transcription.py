@@ -62,6 +62,10 @@ JOIN_MAX_SECONDS = 30.0
 #: The longest piece of audio sent at once for the whole-file text when the
 #: recording is too large for one request (the model's own window).
 WINDOW_SECONDS = 30.0
+#: A turn shorter than this is a piece of speech rather than a turn...
+PIECE_SECONDS = 1.5
+#: ...and belongs with its speaker's speech that is at most this far away.
+PIECE_GAP_SECONDS = 2.5
 
 
 def join_close_turns(
@@ -169,6 +173,66 @@ def _key(word: str) -> str:
 
 def _words(text: str) -> list[str]:
     return [word for word in text.split() if _key(word)]
+
+
+def piece_runs(
+    turns: Sequence[SpeakerTurn],
+    texts: Sequence[str],
+    *,
+    piece_seconds: float = PIECE_SECONDS,
+    max_gap: float = PIECE_GAP_SECONDS,
+    max_length: float = JOIN_MAX_SECONDS,
+) -> list[list[int]]:
+    """Runs of one speaker's turns that are one stretch of speech cut into
+    pieces: consecutive turns (nobody else in between), each at most
+    ``max_gap`` after the one before, with at least one short piece (under
+    ``piece_seconds``) that was heard ("" turns are left alone), and at most
+    ``max_length`` long in all. Speaker detection cuts "till" / "företag." /
+    "och myndigheter." out of one sentence; a fraction of a second of audio
+    on its own is heard as one word, a wrong word or nothing.
+
+    ``turns`` must be in order of time. Returns the turn indexes of each run.
+    """
+    runs: list[list[int]] = []
+    current: list[int] = []
+
+    def close() -> None:
+        if len(current) > 1 and any(
+            turns[i].end - turns[i].start < piece_seconds for i in current
+        ):
+            runs.append(list(current))
+        current.clear()
+
+    for index, (turn, text) in enumerate(zip(turns, texts, strict=True)):
+        if not text.strip():
+            close()  # nothing heard: no words to merge, and it may be a cough
+            continue
+        if current:
+            last = turns[current[-1]]
+            if (
+                index == current[-1] + 1
+                and last.speaker == turn.speaker
+                and turn.start - last.end <= max_gap
+                and turn.end - turns[current[0]].start <= max_length
+            ):
+                current.append(index)
+                continue
+            close()
+        current.append(index)
+    close()
+    return runs
+
+
+def pick_run_text(joined_text: str, piece_texts: Sequence[str]) -> str:
+    """The text of a run of pieces: what the model heard in the whole run at
+    once, unless that has fewer words than the pieces heard one by one (it
+    then dropped some; a piece across a pause is easily missed, or a
+    neighbour's overlapping words heard instead). Then the pieces' own words,
+    joined. Words are never lost by merging."""
+    pieces = " ".join(text.strip() for text in piece_texts if text.strip())
+    if len(_words(joined_text)) >= len(_words(pieces)):
+        return joined_text.strip()
+    return pieces
 
 
 def rescue_text(

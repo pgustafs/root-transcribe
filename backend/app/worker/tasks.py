@@ -437,7 +437,7 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
         slice_wav,
     )
     from app.services.transcript_align import Segment as AlignedSegment
-    from app.services.transcript_align import align
+    from app.services.transcript_align import SpeakerTurn, align
     from app.services.transcription import get_transcription_service
 
     aid = uuid.UUID(attempt_id)
@@ -734,6 +734,49 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                         "recording_id": recording_id,
                     },
                 )
+            # One stretch of a speaker's speech cut into pieces: heard again
+            # as a whole and shown as one segment (never losing a word).
+            runs = turn_stt.piece_runs(ordered, texts)
+            if runs:
+                first_of = {run[0]: run for run in runs}
+                merged = {index for run in runs for index in run}
+                new_turns: list[SpeakerTurn] = []
+                new_texts: list[str] = []
+                for index, turn in enumerate(ordered):
+                    run = first_of.get(index)
+                    if run is None:
+                        if index not in merged:
+                            new_turns.append(turn)
+                            new_texts.append(texts[index])
+                        continue
+                    whole = SpeakerTurn(turn.speaker, turn.start, ordered[run[-1]].end)
+                    with session_scope() as session:
+                        transcription_attempt_crud.heartbeat_sync(
+                            session, aid, step="transcribe-turns"
+                        )
+                    clip_start, _ = turn_stt.clip_bounds(ordered, run[0], wav_duration)
+                    _, clip_end = turn_stt.clip_bounds(ordered, run[-1], wav_duration)
+                    heard = service.transcribe_sync(
+                        slice_wav(
+                            wav_path, clip_start, clip_end, turn_stt.SILENCE_SECONDS
+                        ),
+                        "pieces.wav",
+                        language=requested_language,
+                    ).text
+                    new_turns.append(whole)
+                    new_texts.append(
+                        turn_stt.pick_run_text(heard, [texts[i] for i in run])
+                    )
+                logger.info(
+                    "pieces of speech merged",
+                    extra={
+                        "operation": "meeting.per_turn_pieces",
+                        "runs": len(runs),
+                        "turns": len(merged),
+                        "recording_id": recording_id,
+                    },
+                )
+                ordered, texts = new_turns, new_texts
             # The model sometimes stops after the first sentence of a clip.
             # The whole-file text has those words: put them back.
             texts, put_back = turn_stt.fill_from_full_text(full_text, ordered, texts)

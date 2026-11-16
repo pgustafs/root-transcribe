@@ -281,6 +281,56 @@ def test_long_recordings_are_cut_into_windows_only_in_pauses() -> None:
     assert window_bounds([], 10.0) == []
 
 
+def test_pieces_of_one_speakers_speech_are_found() -> None:
+    from app.services.turn_transcription import piece_runs
+
+    turns = [
+        SpeakerTurn("A", 40.0, 44.0),  # "Vi hjälper även små ..."
+        SpeakerTurn("A", 45.2, 45.6),  # "till": 1.2 s later, 0.4 s long
+        SpeakerTurn("A", 47.0, 48.3),  # "företag och myndigheter."
+        SpeakerTurn("B", 49.0, 49.4),  # "Ja." from someone else
+        SpeakerTurn("A", 50.0, 50.5),  # short, but B spoke in between
+        SpeakerTurn("A", 53.5, 54.0),  # short, but 3 s of silence before
+        SpeakerTurn("B", 55.0, 60.0),
+        SpeakerTurn("B", 60.8, 65.0),  # no short piece: two real turns
+        SpeakerTurn("A", 66.0, 66.4),
+        SpeakerTurn("A", 66.9, 67.3),  # nothing heard: ends the run
+        SpeakerTurn("A", 67.8, 70.0),
+    ]
+    texts = [
+        "Vi hjälper även små.",
+        "till",
+        "företag och myndigheter.",
+        "Ja.",
+        "Nej.",
+        "Så.",
+        "Det kan vi ha.",
+        "Absolut.",
+        "Hm.",
+        "",
+        "Då kör vi.",
+    ]
+    assert piece_runs(turns, texts) == [[0, 1, 2]]
+    # A run stays within one 30-second request.
+    long = [SpeakerTurn("A", 0.0, 29.0), SpeakerTurn("A", 29.5, 30.5)]
+    assert piece_runs(long, ["a", "b"]) == []
+    assert piece_runs([], []) == []
+
+
+def test_a_run_of_pieces_never_loses_words() -> None:
+    from app.services.turn_transcription import pick_run_text
+
+    pieces = ["Vi hjälper även små.", "till", "företag."]
+    # Heard better as a whole: taken.
+    whole = "Vi hjälper även små, till företag och myndigheter."
+    assert pick_run_text(whole, pieces) == whole
+    # A piece across the pause was dropped: the pieces' own words, joined.
+    assert pick_run_text(" Vi hjälper även små.", pieces) == (
+        "Vi hjälper även små. till företag."
+    )
+    assert pick_run_text("", ["", "Ja."]) == "Ja."
+
+
 FULL = (
     " Hej! Hej! Jag heter Peter. Vad heter du? Jag heter Gunilla. Hur mår du "
     "Gunilla idag? Jag mår bra, men lite trött. Hur mår du? Jag mår också bra. "

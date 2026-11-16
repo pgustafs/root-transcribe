@@ -105,7 +105,7 @@ def _wire_pipeline(
         calls["stt_languages"].append(language)
         if isinstance(stt_result, Exception):
             raise stt_result
-        if filename in ("turn.wav", "context.wav"):
+        if filename in ("turn.wav", "context.wav", "pieces.wav"):
             # Per-turn fallback slice: echo a text derived from the clip marker
             # (or what a test says the model hears in that clip).
             marker = audio.decode()
@@ -552,6 +552,9 @@ def test_short_turns_that_come_back_empty_are_heard_again_with_context(
         "0.0-4.9": "Hej! Hej! Jag heter Peter. Vad heter",
         "10.1-15.9": "bra, men lite trött. Hur mår du? Jag mår också bra.",
         "14.5-20.5": "Jag mår också bra.",
+        # Both of speaker 01's pieces at once: the model stops after the first
+        # sentence. The pieces' own words are kept instead.
+        "9.8-13.6": "Jag mår bra men lite trött.",
     }
 
     assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
@@ -561,16 +564,17 @@ def test_short_turns_that_come_back_empty_are_heard_again_with_context(
         ("SPEAKER_00", "Hej!"),
         ("SPEAKER_01", "Hej!"),
         ("SPEAKER_00", "Jag heter Peter. Vad heter du?"),
-        ("SPEAKER_01", "Jag mår bra men lite trött."),
-        ("SPEAKER_01", "Hur mår du?"),
+        # The rescued reply follows its speaker's own turn: one segment.
+        ("SPEAKER_01", "Jag mår bra men lite trött. Hur mår du?"),
         ("SPEAKER_00", "Jag mår också bra."),
     ]
     # The rescued replies keep the time the diarization gave them.
     assert (segs[1]["start_ms"], segs[1]["end_ms"]) == (1900, 2400)
-    assert (segs[4]["start_ms"], segs[4]["end_ms"]) == (12600, 13400)
+    assert (segs[3]["start_ms"], segs[3]["end_ms"]) == (10000, 13400)
     # One extra request per empty turn, nothing more.
     assert calls["stt_calls"].count("context.wav") == 3
     assert calls["stt_calls"].count("turn.wav") == 7
+    assert calls["stt_calls"].count("pieces.wav") == 1
 
 
 def test_transcribe_attempt_failure_persists_then_reraises(
