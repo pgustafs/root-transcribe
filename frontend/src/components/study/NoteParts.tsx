@@ -67,14 +67,16 @@ export function SlideText({ text }: { text: string }) {
   return (
     <Collapsible className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className="group -ml-2.5">
-            <ChevronDownIcon
-              data-icon="inline-start"
-              className="transition-transform group-data-[state=closed]:-rotate-90"
-            />
-            {t("page.slideText")}
-          </Button>
+        <CollapsibleTrigger
+          render={
+            <Button variant="ghost" size="sm" className="group -ml-2.5" />
+          }
+        >
+          <ChevronDownIcon
+            data-icon="inline-start"
+            className="transition-transform group-data-[state=closed]:-rotate-90"
+          />
+          {t("page.slideText")}
         </CollapsibleTrigger>
         <Button variant="ghost" size="sm" onClick={() => void copy()}>
           {copied ? (

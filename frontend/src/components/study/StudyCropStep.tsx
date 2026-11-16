@@ -170,11 +170,10 @@ export function StudyCropStep({ getPreview, initial, onChange }: Props) {
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">{t("crop.intro")}</p>
       <ToggleGroup
-        type="single"
         variant="outline"
         className="flex-wrap justify-start"
-        value={mode}
-        onValueChange={(value) => {
+        value={[mode]}
+        onValueChange={([value]) => {
           if (value) apply(value as "full" | "area", area);
         }}
       >

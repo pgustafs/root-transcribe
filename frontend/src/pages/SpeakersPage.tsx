@@ -262,11 +262,11 @@ export function SpeakersPage() {
                   return setPrivacyOpen(expanded);
                 }}
               >
-                <CollapsibleTrigger asChild={true}>
-                  <Button variant="ghost" size="sm">
-                    {t("speakers.privacy")}
-                    <ChevronDownIcon data-icon="inline-end" />
-                  </Button>
+                <CollapsibleTrigger
+                  render={<Button variant="ghost" size="sm" />}
+                >
+                  {t("speakers.privacy")}
+                  <ChevronDownIcon data-icon="inline-end" />
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-3">
                   {privacyOpen && <ComplianceExportsCard />}
@@ -418,11 +418,11 @@ function AddSpeakerModal({
                     return setVoiceOptions(expanded);
                   }}
                 >
-                  <CollapsibleTrigger asChild={true}>
-                    <Button variant="ghost" size="sm">
-                      {t("speakers.addModal.voiceOptions")}
-                      <ChevronDownIcon data-icon="inline-end" />
-                    </Button>
+                  <CollapsibleTrigger
+                    render={<Button variant="ghost" size="sm" />}
+                  >
+                    {t("speakers.addModal.voiceOptions")}
+                    <ChevronDownIcon data-icon="inline-end" />
                   </CollapsibleTrigger>
                   <CollapsibleContent className="pt-3">
                     <div className="flex flex-col gap-4">

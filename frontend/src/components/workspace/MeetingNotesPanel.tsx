@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import {
   CopyIcon,
   DownloadIcon,
@@ -26,7 +26,7 @@ import { Markdown } from "@/components/Markdown";
 import { MarkdownEditor } from "@/components/MarkdownEditor";
 import { useToast } from "@/components/toast/useToast";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -179,27 +179,29 @@ function NoteCard({
             </Button>
             {canExport && (
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={exporting}
-                    aria-busy={exporting}
-                  >
-                    {exporting ? (
-                      <Spinner data-icon="inline-start" />
-                    ) : (
-                      <DownloadIcon data-icon="inline-start" />
-                    )}
-                    {t("panel.export")}
-                  </Button>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={exporting}
+                      aria-busy={exporting}
+                    />
+                  }
+                >
+                  {exporting ? (
+                    <Spinner data-icon="inline-start" />
+                  ) : (
+                    <DownloadIcon data-icon="inline-start" />
+                  )}
+                  {t("panel.export")}
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuGroup>
                     {EXPORT_FORMATS.map((format) => (
                       <DropdownMenuItem
                         key={format}
-                        onSelect={() => void download(format)}
+                        onClick={() => void download(format)}
                       >
                         {t(`panel.formats.${format}`)}
                       </DropdownMenuItem>
@@ -218,24 +220,28 @@ function NoteCard({
         )}
         {canEdit && !working && draft === null && (
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("panel.moreActions", { agent: note.agent_name })}
-                className="text-muted-foreground"
-              >
-                <MoreVerticalIcon />
-              </Button>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("panel.moreActions", {
+                    agent: note.agent_name,
+                  })}
+                  className="text-muted-foreground"
+                />
+              }
+            >
+              <MoreVerticalIcon />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
-                <DropdownMenuItem disabled={!canRunAgain} onSelect={onRunAgain}>
+                <DropdownMenuItem disabled={!canRunAgain} onClick={onRunAgain}>
                   {t("panel.runAgain")}
                 </DropdownMenuItem>
                 {note.edited && (
                   <DropdownMenuItem
-                    onSelect={() =>
+                    onClick={() =>
                       restore.mutate(note.id, {
                         onSuccess: () => toast.success(t("panel.restored")),
                         onError: (cause) =>
@@ -251,7 +257,7 @@ function NoteCard({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   variant="destructive"
-                  onSelect={() => setConfirmDelete(true)}
+                  onClick={() => setConfirmDelete(true)}
                 >
                   {t("common:actions.delete")}
                 </DropdownMenuItem>
@@ -455,9 +461,12 @@ export function MeetingNotesPanel({
             <h3 id="notes-create-heading" className="eyebrow">
               {t("panel.create")}
             </h3>
-            <Button asChild variant="link" size="sm">
-              <Link to="/agents">{t("panel.manageAgents")}</Link>
-            </Button>
+            <Link
+              to="/agents"
+              className={buttonVariants({ variant: "link", size: "sm" })}
+            >
+              {t("panel.manageAgents")}
+            </Link>
           </div>
           <div className="mt-2 flex flex-col gap-2">
             {agents.isLoading && (
@@ -553,10 +562,16 @@ export function MeetingNotesPanel({
                 {card(note)}
                 {older.length > 0 && (
                   <Collapsible>
-                    <CollapsibleTrigger asChild>
-                      <Button variant="link" size="sm" className="self-start">
-                        {t("panel.earlier", { count: older.length })}
-                      </Button>
+                    <CollapsibleTrigger
+                      render={
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="self-start"
+                        />
+                      }
+                    >
+                      {t("panel.earlier", { count: older.length })}
                     </CollapsibleTrigger>
                     <CollapsibleContent className="mt-2 flex flex-col gap-3">
                       {older.map(card)}

@@ -29,18 +29,22 @@ export function ThemeToggle({
   return (
     <DropdownMenu>
       <Tooltip>
-        <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size={side === "right" ? "icon-lg" : "icon-sm"}
-              aria-label={label}
-              className="text-muted-foreground [&_svg:not([class*='size-'])]:size-[19px]"
-            >
-              <SunIcon className="dark:hidden" />
-              <MoonIcon className="hidden dark:block" />
-            </Button>
-          </DropdownMenuTrigger>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size={side === "right" ? "icon-lg" : "icon-sm"}
+                  aria-label={label}
+                  className="text-muted-foreground [&_svg:not([class*='size-'])]:size-[19px]"
+                />
+              }
+            />
+          }
+        >
+          <SunIcon className="dark:hidden" />
+          <MoonIcon className="hidden dark:block" />
         </TooltipTrigger>
         <TooltipContent side={side}>{label}</TooltipContent>
       </Tooltip>

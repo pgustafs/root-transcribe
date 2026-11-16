@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useParams } from "react-router";
 
 import * as studyApi from "@/api/study";
 import { NOTE_TAGS } from "@/api/study";
@@ -105,19 +105,19 @@ function Crumbs({
     <Breadcrumb aria-label={t("common:breadcrumb")}>
       <BreadcrumbList>
         <BreadcrumbItem>
-          <BreadcrumbLink asChild>
-            <RouterLink to={`/workspaces/${workspaceId}`}>
-              {workspaceName}
-            </RouterLink>
+          <BreadcrumbLink
+            render={<RouterLink to={`/workspaces/${workspaceId}`} />}
+          >
+            {workspaceName}
           </BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
           {notebookTitle ? (
-            <BreadcrumbLink asChild>
-              <RouterLink to={`/workspaces/${workspaceId}/study`}>
-                {t("study:page.notebooks")}
-              </RouterLink>
+            <BreadcrumbLink
+              render={<RouterLink to={`/workspaces/${workspaceId}/study`} />}
+            >
+              {t("study:page.notebooks")}
             </BreadcrumbLink>
           ) : (
             <BreadcrumbPage>{t("study:page.notebooks")}</BreadcrumbPage>
@@ -399,14 +399,16 @@ function NoteEntry({
               <TagBadges tags={tags} />
             </div>
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("study:page.actions", { time: at })}
-                >
-                  <MoreVerticalIcon data-icon="inline-start" />
-                </Button>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t("study:page.actions", { time: at })}
+                  />
+                }
+              >
+                <MoreVerticalIcon data-icon="inline-start" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
@@ -425,19 +427,19 @@ function NoteEntry({
                   {canEnrich && (
                     <DropdownMenuItem
                       disabled={improving || working}
-                      onSelect={() => enrich.mutate(note.id)}
+                      onClick={() => enrich.mutate(note.id)}
                     >
                       <SparklesIcon />
                       {t("study:page.enrichAgain")}
                     </DropdownMenuItem>
                   )}
                   {canLinkSource && !note.source_time_url && (
-                    <DropdownMenuItem onSelect={() => setLinking(true)}>
+                    <DropdownMenuItem onClick={() => setLinking(true)}>
                       <LinkIcon />
                       {t("study:page.sourceTime")}
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem onSelect={() => setConfirming(true)}>
+                  <DropdownMenuItem onClick={() => setConfirming(true)}>
                     <Trash2Icon />
                     {t("study:page.deleteNote")}
                   </DropdownMenuItem>
@@ -790,12 +792,11 @@ function NotebookView({
               {view === "notes" && (
                 <div className="flex flex-wrap items-center gap-2">
                   <ToggleGroup
-                    type="single"
                     variant="outline"
                     size="sm"
                     aria-label={t("study:page.filter")}
-                    value={only}
-                    onValueChange={(value) => {
+                    value={[only]}
+                    onValueChange={([value]) => {
                       if (value) setOnly(value as "all" | NoteTag);
                     }}
                   >

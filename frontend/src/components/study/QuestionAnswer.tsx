@@ -2,7 +2,7 @@
 
 import { ExternalLinkIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink } from "react-router";
 
 import type { AnswerSource, StudyNote } from "@/api/study";
 import { Markdown } from "@/components/Markdown";

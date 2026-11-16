@@ -68,9 +68,9 @@ it("compares the selected revision and approves that revision with the review no
   expect(
     await screen.findByRole("dialog", { name: "Transcript revisions" }),
   ).toBeVisible();
-  const candidate = await screen.findByRole("radio", { name: /Revision 2/ });
-  expect(candidate).toBeChecked();
-  await actor.click(screen.getByRole("radio", { name: /Revision 1/ }));
+  const candidate = await screen.findByRole("button", { name: /Revision 2/ });
+  expect(candidate).toHaveAttribute("aria-pressed", "true");
+  await actor.click(screen.getByRole("button", { name: /Revision 1/ }));
   expect(await screen.findByText("Alex: Original words")).toBeVisible();
   expect(
     screen.queryByRole("button", { name: "Approve revision" }),

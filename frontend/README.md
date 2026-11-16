@@ -7,7 +7,7 @@ See the [architecture](../ARCHITECTURE.md) and [setup guide](../README.md).
 
 ## Development
 
-Use Node.js 24+ and npm. From this directory:
+Use Node.js 26+ and npm. From this directory:
 
 ```sh
 npm ci
@@ -20,6 +20,10 @@ must allow the frontend origin. The realm template includes development origins;
 the deployment generator instead sets the origin selected in `APP_URL`.
 Production builds use [nginx](../deploy/frontend-nginx.conf) to serve static assets
 and proxy the API. The application shell is revalidated; hashed assets are cached.
+The [image](../deploy/frontend.Containerfile) is built on Red Hat Hardened Images
+(Project Hummingbird): `hi/nodejs:26-builder` builds the bundle and the distroless
+`hi/nginx:1.30` serves it as UID 65532 on port 8080. The runtime image has no shell,
+so everything that needs one runs in the build stage.
 
 ## Pages and state
 
@@ -52,8 +56,11 @@ preference, and there is no preference editor for already uploaded recordings.
 
 ## Components and branding
 
-Application-owned UI primitives live in `src/components/ui/` and use Radix,
-Tailwind CSS v4 and Lucide icons. Their MIT notice is retained in
+Application-owned UI primitives live in `src/components/ui/` and use the Base UI
+flavour of shadcn/ui (`base-nova` style, `@base-ui/react`), Tailwind CSS v4 and
+Lucide icons. Compose with the `render` prop (there is no `asChild`); links that
+look like buttons are router `Link`s with `buttonVariants(...)`, so they keep the
+link role. Their MIT notice is retained in
 [src/components/ui/LICENSE](src/components/ui/LICENSE). `components.json`
 configures the shadcn CLI; run `npx shadcn@latest add <component>` here when adding
 a primitive. Theme tokens and transcript layouts live in `src/index.css`.

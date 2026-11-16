@@ -44,14 +44,14 @@ it.each(["Auto", "English", "Swedish"])(
       </I18nextProvider>,
     );
     const user = userEvent.setup();
-    const group = await screen.findByRole("radiogroup", {
+    const group = await screen.findByRole("group", {
       name: "Recording language",
     });
-    const option = within(group).getByRole("radio", { name: label });
+    const option = within(group).getByRole("button", { name: label });
     await user.click(option);
     // Clicking the selected choice again must not clear the required selection.
     await user.click(option);
-    expect(option).toHaveAttribute("aria-checked", "true");
+    expect(option).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Start recording" }));
     await waitFor(() =>
       expect(start).toHaveBeenCalledWith(

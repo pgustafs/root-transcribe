@@ -14,7 +14,7 @@ type Props = {
   onChange: (value: string) => void;
   isDisabled?: boolean;
 };
-// Radix reserves the empty string for clearing the selection.
+// The empty string means "no filter"; the list uses a sentinel for it.
 const ALL = "__all__";
 export function FilterSelect({
   "aria-label": label,
@@ -25,8 +25,10 @@ export function FilterSelect({
 }: Props) {
   return (
     <Select
+      // Base UI's SelectValue shows the raw value unless it knows the labels.
+      items={options.map((o) => ({ value: o.value || ALL, label: o.label }))}
       value={value || ALL}
-      onValueChange={(v) => onChange(v === ALL ? "" : v)}
+      onValueChange={(v) => onChange(!v || v === ALL ? "" : v)}
       disabled={isDisabled}
     >
       <SelectTrigger aria-label={label} className="min-w-36">

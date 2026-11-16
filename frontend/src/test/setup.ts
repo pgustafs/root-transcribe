@@ -69,7 +69,7 @@ Element.prototype.scrollTo = Element.prototype.scrollTo ?? (() => {});
 Element.prototype.scrollIntoView =
   Element.prototype.scrollIntoView ?? (() => {});
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 
 afterEach(() => {
   cleanup();

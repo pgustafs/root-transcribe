@@ -3,7 +3,7 @@ import {
   UsersIcon,
   XIcon,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   TableHead,
   TableRow,
@@ -91,16 +91,15 @@ export function UsersPage() {
     );
   };
   const createButton = config ? (
-    <Button variant="default" asChild={true}>
-      <a
-        href={`${config.keycloak_url}/admin/${config.keycloak_realm}/console/`}
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        {<ExternalLinkAltIcon data-icon="inline-start" />}
-        {t("users:identity.manageUsers")}
-      </a>
-    </Button>
+    <a
+      href={`${config.keycloak_url}/admin/${config.keycloak_realm}/console/`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={buttonVariants({ variant: "default" })}
+    >
+      <ExternalLinkAltIcon data-icon="inline-start" />
+      {t("users:identity.manageUsers")}
+    </a>
   ) : undefined;
 
   return (

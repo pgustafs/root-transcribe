@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, matchPath, Outlet, useLocation } from "react-router-dom";
+import { Link, matchPath, Outlet, useLocation } from "react-router";
 import {
   BotIcon,
   FolderOpenIcon,
@@ -36,7 +36,7 @@ import {
   NotificationBellToggle,
   NotificationsDrawerPanel,
 } from "@/components/NotificationBell";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -84,25 +84,22 @@ function RailLink({ link, selected }: { link: NavLink; selected: boolean }) {
   const Icon = link.icon;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          asChild
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "text-muted-foreground [&_svg:not([class*='size-'])]:size-[19px]",
-            selected &&
-              "bg-foreground/8 text-foreground hover:bg-foreground/12 dark:hover:bg-foreground/12",
-          )}
-        >
+      <TooltipTrigger
+        render={
           <Link
             to={link.to}
             aria-label={link.label}
             aria-current={selected ? "page" : undefined}
-          >
-            <Icon />
-          </Link>
-        </Button>
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon-lg" }),
+              "text-muted-foreground [&_svg:not([class*='size-'])]:size-[19px]",
+              selected &&
+                "bg-foreground/8 text-foreground hover:bg-foreground/12 dark:hover:bg-foreground/12",
+            )}
+          />
+        }
+      >
+        <Icon />
       </TooltipTrigger>
       <TooltipContent side="right">{link.label}</TooltipContent>
     </Tooltip>
@@ -208,18 +205,16 @@ export function AppLayout() {
       align={side === "right" ? "end" : "start"}
       className="min-w-56"
     >
-      <DropdownMenuLabel className="truncate font-normal text-muted-foreground">
-        {user?.email}
-      </DropdownMenuLabel>
       <DropdownMenuGroup>
-        <DropdownMenuItem asChild>
-          <Link to="/profile">
-            <UserIcon />
-            {t("masthead.myProfile")}
-          </Link>
+        <DropdownMenuLabel className="truncate font-normal text-muted-foreground">
+          {user?.email}
+        </DropdownMenuLabel>
+        <DropdownMenuItem render={<Link to="/profile" />}>
+          <UserIcon />
+          {t("masthead.myProfile")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void logout()}>
+        <DropdownMenuItem onClick={() => void logout()}>
           <LogOutIcon />
           {t("masthead.logout")}
         </DropdownMenuItem>
@@ -239,14 +234,16 @@ export function AppLayout() {
       className="flex w-13 shrink-0 flex-col items-center gap-2 px-1 py-2"
     >
       <Tooltip>
-        <TooltipTrigger asChild>
-          <Link
-            to="/workspaces"
-            aria-label={`enrooted · ${appName}`}
-            className="m-1 grid size-7 place-items-center rounded-md"
-          >
-            <BrandMark className="size-7" />
-          </Link>
+        <TooltipTrigger
+          render={
+            <Link
+              to="/workspaces"
+              aria-label={`enrooted · ${appName}`}
+              className="m-1 grid size-7 place-items-center rounded-md"
+            />
+          }
+        >
+          <BrandMark className="size-7" />
         </TooltipTrigger>
         <TooltipContent side="right">{appName}</TooltipContent>
       </Tooltip>
@@ -258,17 +255,21 @@ export function AppLayout() {
         <ThemeToggle side="right" />
         <DropdownMenu>
           <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={accountLabel}
-                  className="rounded-full"
-                >
-                  {avatar}
-                </Button>
-              </DropdownMenuTrigger>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-lg"
+                      aria-label={accountLabel}
+                      className="rounded-full"
+                    />
+                  }
+                />
+              }
+            >
+              {avatar}
             </TooltipTrigger>
             <TooltipContent side="right">
               {user?.email ?? t("masthead.account")}
@@ -319,20 +320,22 @@ export function AppLayout() {
       </div>
       <div className="flex shrink-0 items-center gap-1 border-t p-2">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              aria-label={accountLabel}
-              className={cn(
-                "h-9 min-w-0 flex-1 justify-start gap-2.5 px-1.5 font-normal",
-                isSelected(profileLink.to) && "bg-foreground/8",
-              )}
-            >
-              {avatar}
-              <span className="truncate text-sm">
-                {user?.full_name ?? user?.email ?? t("masthead.account")}
-              </span>
-            </Button>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                aria-label={accountLabel}
+                className={cn(
+                  "h-9 min-w-0 flex-1 justify-start gap-2.5 px-1.5 font-normal",
+                  isSelected(profileLink.to) && "bg-foreground/8",
+                )}
+              />
+            }
+          >
+            {avatar}
+            <span className="truncate text-sm">
+              {user?.full_name ?? user?.email ?? t("masthead.account")}
+            </span>
           </DropdownMenuTrigger>
           {accountMenu("top")}
         </DropdownMenu>
@@ -343,16 +346,18 @@ export function AppLayout() {
 
   const iconButton = (label: string, icon: ReactNode, onClick: () => void) => (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={label}
-          className="text-muted-foreground"
-          onClick={onClick}
-        >
-          {icon}
-        </Button>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={label}
+            className="text-muted-foreground"
+            onClick={onClick}
+          />
+        }
+      >
+        {icon}
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -396,20 +401,24 @@ export function AppLayout() {
             />
             <DropdownMenu>
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={t("masthead.selectLanguage")}
-                      className="text-muted-foreground"
-                    >
-                      <GlobeIcon data-icon="inline-start" />
-                      <span className="hidden sm:inline">
-                        {language.toUpperCase()}
-                      </span>
-                    </Button>
-                  </DropdownMenuTrigger>
+                <TooltipTrigger
+                  render={
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={t("masthead.selectLanguage")}
+                          className="text-muted-foreground"
+                        />
+                      }
+                    />
+                  }
+                >
+                  <GlobeIcon data-icon="inline-start" />
+                  <span className="hidden sm:inline">
+                    {language.toUpperCase()}
+                  </span>
                 </TooltipTrigger>
                 <TooltipContent>{t("masthead.selectLanguage")}</TooltipContent>
               </Tooltip>
@@ -418,7 +427,7 @@ export function AppLayout() {
                   {languages.map((l) => (
                     <DropdownMenuItem
                       key={l.code}
-                      onSelect={() => setLanguage(l.code)}
+                      onClick={() => setLanguage(l.code)}
                     >
                       {l.label}
                     </DropdownMenuItem>
@@ -439,7 +448,7 @@ export function AppLayout() {
           <SheetContent
             side="left"
             showCloseButton={false}
-            onOpenAutoFocus={(e) => e.preventDefault()}
+            initialFocus={false}
             className="w-68 max-w-[92vw] gap-0 p-0"
           >
             <SheetTitle className="sr-only">{t("nav.menu")}</SheetTitle>

@@ -188,19 +188,21 @@ export function MeetingCommentsDrawer({
             open={openMenuId === comment.id}
             onOpenChange={(open) => setOpenMenuId(open ? comment.id : null)}
           >
-            <DropdownMenuTrigger asChild={true}>
-              <Button
-                aria-label={t("comments.actionsFor", {
-                  name:
-                    comment.author_name ??
-                    comment.author_email ??
-                    t("access:workspaces.comments.deletedUser"),
-                })}
-                variant="ghost"
-                size="icon"
-              >
-                {<EllipsisVIcon data-icon="inline-start" />}
-              </Button>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  aria-label={t("comments.actionsFor", {
+                    name:
+                      comment.author_name ??
+                      comment.author_email ??
+                      t("access:workspaces.comments.deletedUser"),
+                  })}
+                  variant="ghost"
+                  size="icon"
+                />
+              }
+            >
+              {<EllipsisVIcon data-icon="inline-start" />}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>

@@ -1,6 +1,6 @@
 /** Application routes and access guards. */
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router";
 import { AdminRoute } from "@/auth/AdminRoute";
 import { PrivilegedRoute } from "@/auth/PrivilegedRoute";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";

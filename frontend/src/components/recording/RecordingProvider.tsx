@@ -35,7 +35,7 @@ import { Alert } from "@/components/Alert";
 import { RecordingDock } from "@/components/recording/RecordingDock";
 import { meetingKeys } from "@/hooks/useMeetings";
 import { useMediaRecorder } from "@/hooks/useMediaRecorder";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { ChangeSourceDialog } from "@/components/study/ChangeSourceDialog";
 import { useFloatingWindow } from "@/hooks/useFloatingWindow";
 import { FloatingNotePanel } from "@/components/study/FloatingNotePanel";

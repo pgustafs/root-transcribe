@@ -180,17 +180,19 @@ export function MarkdownEditor({
           >
             {tools.map(({ key, icon: Icon, run }) => (
               <Tooltip key={key}>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t(`editor.tools.${key}`)}
-                    className="text-muted-foreground"
-                    onClick={() => apply(run)}
-                  >
-                    <Icon />
-                  </Button>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t(`editor.tools.${key}`)}
+                      className="text-muted-foreground"
+                      onClick={() => apply(run)}
+                    />
+                  }
+                >
+                  <Icon />
                 </TooltipTrigger>
                 <TooltipContent>{t(`editor.tools.${key}`)}</TooltipContent>
               </Tooltip>

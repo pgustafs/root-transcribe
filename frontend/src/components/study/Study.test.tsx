@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import type { ReactNode } from "react";
 import { I18nextProvider } from "react-i18next";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import type { StudyNote, StudyNotebookDetail } from "@/api/study";
@@ -257,7 +257,7 @@ it("crop step: the video area can be set from the keyboard", async () => {
   );
   await screen.findByAltText("Preview of the shared tab");
   await userEvent.click(
-    screen.getByRole("radio", { name: "Select video area" }),
+    screen.getByRole("button", { name: "Select video area" }),
   );
   const area = await screen.findByRole("button", { name: "Video area" });
   area.focus();
@@ -274,7 +274,7 @@ it("crop step: the video area can be set from the keyboard", async () => {
   await userEvent.clear(left);
   await userEvent.type(left, "20");
   expect(onChange.mock.lastCall?.[0].x).toBe(0.2);
-  await userEvent.click(screen.getByRole("radio", { name: "Use full frame" }));
+  await userEvent.click(screen.getByRole("button", { name: "Use full frame" }));
   expect(onChange).toHaveBeenLastCalledWith({
     x: 0,
     y: 0,
@@ -561,7 +561,7 @@ it("notebook: what the model added, marks, search, glossary and wider context", 
   );
   expect(screen.getAllByRole("article")).toHaveLength(1);
   await userEvent.clear(screen.getByRole("textbox", { name: "Search notes" }));
-  await userEvent.click(screen.getByRole("radio", { name: "Important" }));
+  await userEvent.click(screen.getByRole("button", { name: "Important" }));
   await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(1));
   expect(
     within(screen.getByRole("article")).getByText("Joins come next."),

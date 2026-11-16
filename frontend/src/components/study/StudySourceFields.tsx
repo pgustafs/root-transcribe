@@ -121,12 +121,11 @@ export function StudySourceFields({
             {t("setup.mode")}
           </FieldLabel>
           <ToggleGroup
-            type="single"
             variant="outline"
             aria-labelledby={`${idPrefix}-mode-label`}
             className="flex-wrap justify-start"
-            value={choice.mode}
-            onValueChange={(value) => {
+            value={[choice.mode]}
+            onValueChange={([value]) => {
               if (value) onChange({ ...choice, mode: value as StudyMode });
             }}
           >

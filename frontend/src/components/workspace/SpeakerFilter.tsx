@@ -35,13 +35,12 @@ export function SpeakerFilter({
   }, [segments]);
   return (
     <ToggleGroup
-      type="single"
       variant="default"
       size="sm"
       spacing={1}
       className="flex-wrap"
-      value={selected ?? "__all__"}
-      onValueChange={(value) =>
+      value={[selected ?? "__all__"]}
+      onValueChange={([value]) =>
         onSelect(value && value !== "__all__" ? value : null)
       }
       aria-label={t("review.filterSpeakers")}

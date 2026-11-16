@@ -7,10 +7,10 @@ import {
   EmptyTitle,
   EmptyMedia,
 } from "@/components/ui/empty";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink } from "react-router";
 import { usePageTitle } from "@/hooks/usePageTitle";
 
 export function NotFoundPage() {
@@ -30,11 +30,9 @@ export function NotFoundPage() {
         <EmptyDescription>{t("errorPages.notFound.body")}</EmptyDescription>
         <EmptyContent>
           <div className="flex flex-wrap justify-center gap-2">
-            <Button asChild>
-              <RouterLink to="/workspaces">
-                {t("errorPages.goToDashboard")}
-              </RouterLink>
-            </Button>
+            <RouterLink to="/workspaces" className={buttonVariants()}>
+              {t("errorPages.goToDashboard")}
+            </RouterLink>
           </div>
         </EmptyContent>
       </Empty>

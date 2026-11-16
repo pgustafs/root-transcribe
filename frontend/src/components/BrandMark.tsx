@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import trilogin from "@/assets/brand/trilogin-trefargad.svg";
 import triloginLight from "@/assets/brand/trilogin-trefargad-ljus.svg";
 import lockupOnDark from "@/assets/brand/enrooted-logotyp-mork-bakgrund.svg";

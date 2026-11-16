@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "shadcn/tailwind.css";
 @source "./";
 
 /* ── enrooted identity (grafisk identitet 2026-10-29v2) ────────────────────────

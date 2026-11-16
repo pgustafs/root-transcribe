@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/table";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 
 import { getErrorMessage } from "@/api/client";
 import type { Workspace } from "@/api/types";

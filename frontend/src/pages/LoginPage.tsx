@@ -1,7 +1,7 @@
 /** Public SSO entry point. Credentials are entered at the identity provider. */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, useLocation } from "react-router-dom";
+import { Navigate, useLocation } from "react-router";
 import { Button } from "@/components/ui/button";
 import {
   Card,

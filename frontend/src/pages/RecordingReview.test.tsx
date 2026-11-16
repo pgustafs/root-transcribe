@@ -9,7 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { I18nextProvider } from "react-i18next";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, expect, it } from "vitest";
 import type { MeetingRecordingDetail } from "@/api/types";
 import { ToastProvider } from "@/components/toast/ToastProvider";
@@ -121,11 +121,13 @@ beforeEach(() => {
 it("filters speaker turns and search together, and can clear an empty result", async () => {
   const actor = userEvent.setup();
   showPage();
-  const speakers = await screen.findByRole("radiogroup", {
+  const speakers = await screen.findByRole("group", {
     name: "Filter transcript by speaker",
   });
   expect(screen.getByText(recording.segments[0].text)).toBeVisible();
-  await actor.click(within(speakers).getByRole("radio", { name: /Speaker 2/ }));
+  await actor.click(
+    within(speakers).getByRole("button", { name: /Speaker 2/ }),
+  );
   expect(
     screen.queryByText(recording.segments[0].text),
   ).not.toBeInTheDocument();
@@ -170,7 +172,7 @@ it("explains a completed recording with no speech instead of showing a blank pan
     await screen.findByRole("heading", { name: "No speech found" }),
   ).toBeVisible();
   expect(
-    screen.queryByRole("radiogroup", { name: "Filter transcript by speaker" }),
+    screen.queryByRole("group", { name: "Filter transcript by speaker" }),
   ).not.toBeInTheDocument();
 });
 
@@ -245,7 +247,7 @@ it("keeps the original diarization label when assigning all turns to a person", 
   await actor.click(
     await screen.findByRole("button", { name: "Assign Speaker 1" }),
   );
-  expect(screen.getByText("All Speaker 1 turns")).toBeVisible();
+  expect(await screen.findByText("All Speaker 1 turns")).toBeVisible();
   const choices = await screen.findAllByRole("menuitem", { name: "Alex" });
   await actor.click(choices[1]);
   await waitFor(() =>
@@ -367,7 +369,7 @@ it.each([false, true])(
     );
     const dialog = await screen.findByRole("dialog", { name: "Upload audio" });
     expect(language).toBeUndefined(); // selecting a file must not start the upload
-    await user.click(within(dialog).getByRole("radio", { name: "English" }));
+    await user.click(within(dialog).getByRole("button", { name: "English" }));
     if (consentRequired) {
       expect(
         within(dialog).getByRole("button", { name: "Upload audio" }),

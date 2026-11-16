@@ -7,7 +7,7 @@
  */
 
 import { type ReactNode } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate } from "react-router";
 
 import { type AuthContextValue } from "@/auth/authContext";
 import { useAuth } from "@/auth/useAuth";

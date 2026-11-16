@@ -111,13 +111,12 @@ export function MeetingRevisionsModal({
           >
             <div className="flex flex-col gap-4">
               <ToggleGroup
-                type="single"
                 variant="outline"
                 spacing={2}
                 className="flex-wrap"
                 aria-label={t("detail.revisionsTitle")}
-                value={selected?.id}
-                onValueChange={(id) => {
+                value={selected ? [selected.id] : []}
+                onValueChange={([id]) => {
                   if (id) setSelectedId(id);
                 }}
               >

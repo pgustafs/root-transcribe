@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
 import { Alert } from "@/components/Alert";
@@ -43,6 +43,8 @@ export function ConfirmDeleteModal({
   onClose,
 }: ConfirmDeleteModalProps) {
   const { t } = useTranslation("common");
+  // The safe choice gets focus when the dialog opens (Enter must not delete).
+  const cancelRef = useRef<HTMLButtonElement>(null);
   return (
     <AlertDialog
       open={isOpen}
@@ -53,6 +55,7 @@ export function ConfirmDeleteModal({
       <AlertDialogContent
         aria-labelledby="confirm-delete-title"
         aria-describedby="confirm-delete-body"
+        initialFocus={cancelRef}
         className="max-h-[90dvh] overflow-y-auto sm:max-w-lg"
       >
         <AlertDialogHeader>
@@ -60,25 +63,25 @@ export function ConfirmDeleteModal({
             {title ?? t("confirmDelete.defaultTitle")}
           </AlertDialogTitle>
         </AlertDialogHeader>
-        <AlertDialogDescription asChild>
-          <div id="confirm-delete-body" className="min-w-0">
-            <div className="flex flex-col gap-4">
-              <div>
-                <p className="app-copy">
-                  <Trans
-                    i18nKey="common:confirmDelete.body"
-                    values={{ name: itemName }}
-                    components={{ strong: <strong /> }}
-                  />
-                  {consequence ? <> {consequence}</> : null}
-                </p>
-              </div>
-              {warning && (
-                <div>
-                  <Alert variant="warning" isInline={true} title={warning} />
-                </div>
-              )}
+        <AlertDialogDescription
+          render={<div id="confirm-delete-body" className="min-w-0" />}
+        >
+          <div className="flex flex-col gap-4">
+            <div>
+              <p className="app-copy">
+                <Trans
+                  i18nKey="common:confirmDelete.body"
+                  values={{ name: itemName }}
+                  components={{ strong: <strong /> }}
+                />
+                {consequence ? <> {consequence}</> : null}
+              </p>
             </div>
+            {warning && (
+              <div>
+                <Alert variant="warning" isInline={true} title={warning} />
+              </div>
+            )}
           </div>
         </AlertDialogDescription>
         <AlertDialogFooter>
@@ -95,7 +98,9 @@ export function ConfirmDeleteModal({
           </Button>
           {/* Cancel stays enabled mid-delete: closing only dismisses the
             dialog, the request settles on its own and reports via the caller. */}
-          <AlertDialogCancel>{t("actions.cancel")}</AlertDialogCancel>
+          <AlertDialogCancel ref={cancelRef}>
+            {t("actions.cancel")}
+          </AlertDialogCancel>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

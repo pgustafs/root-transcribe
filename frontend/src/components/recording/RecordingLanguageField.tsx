@@ -17,12 +17,11 @@ export function RecordingLanguageField({
     <Field>
       <FieldLabel id={`${id}-label`}>{t("recordingLanguage.label")}</FieldLabel>
       <ToggleGroup
-        type="single"
         variant="outline"
-        value={value}
+        value={[value]}
         aria-labelledby={`${id}-label`}
         aria-describedby={`${id}-help`}
-        onValueChange={(next) => {
+        onValueChange={([next]) => {
           if (next === "auto" || next === "en" || next === "sv") onChange(next);
         }}
       >

@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { I18nextProvider } from "react-i18next";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { beforeEach, expect, it } from "vitest";
 
 import type { NoteAgent } from "@/api/notes";
@@ -118,7 +118,7 @@ it("lets any user add a personal agent but only read shared ones", async () => {
     screen.getByRole("switch", {
       name: "Summary is available when creating documents",
     }),
-  ).toBeDisabled();
+  ).toHaveAttribute("aria-disabled", "true");
   expect(
     screen.queryByRole("button", { name: "New shared agent" }),
   ).not.toBeInTheDocument();

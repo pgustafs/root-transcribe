@@ -31,7 +31,7 @@ import {
   CardDescription,
   CardContent,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import {
   DialogHeader,
@@ -73,7 +73,7 @@ import { WorkspaceMembersTab } from "@/components/workspace/WorkspaceMembersTab"
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router";
 
 import { getErrorMessage } from "@/api/client";
 import {
@@ -93,7 +93,7 @@ import { ConfirmDeleteModal } from "@/components/ConfirmDeleteModal";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { PREFLIGHT_EVENTS } from "@/components/recording/RecordingProvider";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink } from "react-router";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -476,12 +476,13 @@ export function WorkspaceMeetingsPage() {
       </div>
       {can("study_notes") && (
         <div>
-          <Button asChild variant="ghost">
-            <RouterLink to={`/workspaces/${id}/study`}>
-              <BookOpenIcon data-icon="inline-start" />
-              {t("study:title")}
-            </RouterLink>
-          </Button>
+          <RouterLink
+            to={`/workspaces/${id}/study`}
+            className={buttonVariants({ variant: "ghost" })}
+          >
+            <BookOpenIcon data-icon="inline-start" />
+            {t("study:title")}
+          </RouterLink>
         </div>
       )}
       {perms.canManageMembers && (
@@ -531,10 +532,8 @@ export function WorkspaceMeetingsPage() {
           <Breadcrumb aria-label={t("common:breadcrumb")}>
             <BreadcrumbList>
               <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <RouterLink to="/workspaces">
-                    {t("common:nav.workspaces")}
-                  </RouterLink>
+                <BreadcrumbLink render={<RouterLink to="/workspaces" />}>
+                  {t("common:nav.workspaces")}
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
@@ -607,159 +606,161 @@ export function WorkspaceMeetingsPage() {
             <Collapsible
               open={!isMobile || libraryOpen}
               onOpenChange={setLibraryOpen}
-              asChild
+              render={
+                <section
+                  className="recording-library"
+                  aria-labelledby="meetings-recordings-heading"
+                />
+              }
             >
-              <section
-                className="recording-library"
-                aria-labelledby="meetings-recordings-heading"
-              >
-                <div className="recording-library-heading">
-                  <h2
-                    id="meetings-recordings-heading"
-                    className="text-sm font-semibold"
-                  >
-                    {t("page.recordingsPane")}
-                  </h2>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">
-                      {rows.length}
-                      {recordings.hasNextPage ? "+" : ""}
-                    </Badge>
-                    {isMobile && (
-                      <CollapsibleTrigger asChild>
+              <div className="recording-library-heading">
+                <h2
+                  id="meetings-recordings-heading"
+                  className="text-sm font-semibold"
+                >
+                  {t("page.recordingsPane")}
+                </h2>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">
+                    {rows.length}
+                    {recordings.hasNextPage ? "+" : ""}
+                  </Badge>
+                  {isMobile && (
+                    <CollapsibleTrigger
+                      render={
                         <Button
                           variant="ghost"
                           size="sm"
                           aria-label={t("page.chooseRecording")}
+                        />
+                      }
+                    >
+                      {t("page.chooseRecording")}
+                      <ChevronDownIcon
+                        data-icon="inline-end"
+                        className={cn(libraryOpen && "rotate-180")}
+                      />
+                    </CollapsibleTrigger>
+                  )}
+                </div>
+              </div>
+              <Separator />
+              <CollapsibleContent className="recording-library-list">
+                <DataState
+                  isLoading={recordings.isLoading}
+                  error={recordings.error}
+                  onRetry={() => void recordings.refetch()}
+                  isEmpty={rows.length === 0}
+                  emptyTitle={t("empty.title")}
+                  emptyBody={t("empty.body")}
+                  emptyIcon={MicrophoneIcon}
+                  loadingLabel={t("page.loading")}
+                  headingLevel="h3"
+                >
+                  <div className="flex flex-col">
+                    {rows.map((r) => (
+                      <div
+                        key={r.id}
+                        className={cn(
+                          "meeting-row",
+                          r.id === openId && "meeting-row-selected",
+                        )}
+                      >
+                        <button
+                          type="button"
+                          aria-label={r.title}
+                          aria-current={r.id === openId ? "true" : undefined}
+                          onClick={() => {
+                            setOpenId(r.id);
+                            setLibraryOpen(false);
+                          }}
+                          className="meeting-row-select"
                         >
-                          {t("page.chooseRecording")}
-                          <ChevronDownIcon
-                            data-icon="inline-end"
-                            className={cn(libraryOpen && "rotate-180")}
+                          <span className="meeting-row-title">{r.title}</span>
+                          <span className="meeting-row-date">
+                            {dateFmt.format(new Date(r.created_at))}
+                          </span>
+                          <span className="meeting-row-meta">
+                            <StatusLabel
+                              presentation={MEETING_STATUS[r.status]}
+                              value={r.status}
+                              isCompact
+                            />
+                            {r.duration_seconds != null && (
+                              <span>{fmtSeconds(r.duration_seconds)}</span>
+                            )}
+                          </span>
+                        </button>
+                        <div className="meeting-row-actions">
+                          <RowActions
+                            toggleAriaLabel={t("actionsFor", {
+                              name: r.title,
+                            })}
+                            items={[
+                              // Retry is offered for terminal recordings,
+                              // but hidden for a NON-retryable media fault
+                              // (issue #37) — the backend would 409 it, and
+                              // re-running the same object fails identically.
+                              ...(canEdit &&
+                              TERMINAL.includes(r.status) &&
+                              isRetryableMeetingError(r.error_code)
+                                ? [
+                                    {
+                                      title: t("actions.retry"),
+                                      onClick: () => retryRecording(r),
+                                    },
+                                  ]
+                                : []),
+                              ...(canEdit
+                                ? [
+                                    {
+                                      title: t("actions.delete"),
+                                      isDanger: true,
+                                      onClick: () => setDeleting(r),
+                                    },
+                                  ]
+                                : []),
+                            ]}
                           />
+                        </div>
+                      </div>
+                    ))}
+                    {recordings.hasNextPage && (
+                      <div>
+                        <Button
+                          onClick={() => void recordings.fetchNextPage()}
+                          disabled={recordings.isFetchingNextPage}
+                          aria-busy={recordings.isFetchingNextPage}
+                          variant="link"
+                        >
+                          {recordings.isFetchingNextPage && (
+                            <Spinner
+                              data-icon="inline-start"
+                              aria-label={undefined}
+                            />
+                          )}
+                          {t("list.showMore")}
                         </Button>
-                      </CollapsibleTrigger>
+                      </div>
                     )}
                   </div>
-                </div>
+                </DataState>
+              </CollapsibleContent>
+              <div className="recording-library-help">
                 <Separator />
-                <CollapsibleContent className="recording-library-list">
-                  <DataState
-                    isLoading={recordings.isLoading}
-                    error={recordings.error}
-                    onRetry={() => void recordings.refetch()}
-                    isEmpty={rows.length === 0}
-                    emptyTitle={t("empty.title")}
-                    emptyBody={t("empty.body")}
-                    emptyIcon={MicrophoneIcon}
-                    loadingLabel={t("page.loading")}
-                    headingLevel="h3"
-                  >
-                    <div className="flex flex-col">
-                      {rows.map((r) => (
-                        <div
-                          key={r.id}
-                          className={cn(
-                            "meeting-row",
-                            r.id === openId && "meeting-row-selected",
-                          )}
-                        >
-                          <button
-                            type="button"
-                            aria-label={r.title}
-                            aria-current={r.id === openId ? "true" : undefined}
-                            onClick={() => {
-                              setOpenId(r.id);
-                              setLibraryOpen(false);
-                            }}
-                            className="meeting-row-select"
-                          >
-                            <span className="meeting-row-title">{r.title}</span>
-                            <span className="meeting-row-date">
-                              {dateFmt.format(new Date(r.created_at))}
-                            </span>
-                            <span className="meeting-row-meta">
-                              <StatusLabel
-                                presentation={MEETING_STATUS[r.status]}
-                                value={r.status}
-                                isCompact
-                              />
-                              {r.duration_seconds != null && (
-                                <span>{fmtSeconds(r.duration_seconds)}</span>
-                              )}
-                            </span>
-                          </button>
-                          <div className="meeting-row-actions">
-                            <RowActions
-                              toggleAriaLabel={t("actionsFor", {
-                                name: r.title,
-                              })}
-                              items={[
-                                // Retry is offered for terminal recordings,
-                                // but hidden for a NON-retryable media fault
-                                // (issue #37) — the backend would 409 it, and
-                                // re-running the same object fails identically.
-                                ...(canEdit &&
-                                TERMINAL.includes(r.status) &&
-                                isRetryableMeetingError(r.error_code)
-                                  ? [
-                                      {
-                                        title: t("actions.retry"),
-                                        onClick: () => retryRecording(r),
-                                      },
-                                    ]
-                                  : []),
-                                ...(canEdit
-                                  ? [
-                                      {
-                                        title: t("actions.delete"),
-                                        isDanger: true,
-                                        onClick: () => setDeleting(r),
-                                      },
-                                    ]
-                                  : []),
-                              ]}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                      {recordings.hasNextPage && (
-                        <div>
-                          <Button
-                            onClick={() => void recordings.fetchNextPage()}
-                            disabled={recordings.isFetchingNextPage}
-                            aria-busy={recordings.isFetchingNextPage}
-                            variant="link"
-                          >
-                            {recordings.isFetchingNextPage && (
-                              <Spinner
-                                data-icon="inline-start"
-                                aria-label={undefined}
-                              />
-                            )}
-                            {t("list.showMore")}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </DataState>
-                </CollapsibleContent>
-                <div className="recording-library-help">
-                  <Separator />
-                  <div className="p-4">
-                    <small className="app-copy">
-                      {t("page.uploadHelp", {
-                        size: Math.floor(
-                          (config.data?.audio_max_bytes ?? 500 * 1024 * 1024) /
-                            1024 /
-                            1024,
-                        ),
-                        minutes: config.data?.recording_max_minutes ?? 120,
-                      })}
-                    </small>
-                  </div>
+                <div className="p-4">
+                  <small className="app-copy">
+                    {t("page.uploadHelp", {
+                      size: Math.floor(
+                        (config.data?.audio_max_bytes ?? 500 * 1024 * 1024) /
+                          1024 /
+                          1024,
+                      ),
+                      minutes: config.data?.recording_max_minutes ?? 120,
+                    })}
+                  </small>
                 </div>
-              </section>
+              </div>
             </Collapsible>
             <Separator orientation="vertical" className="hidden md:block" />
             <section
@@ -1155,18 +1156,18 @@ function MeetingDetail({
               open={exportOpen}
               onOpenChange={setExportOpen}
             >
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <DownloadIcon data-icon="inline-start" />
-                  {t("detail.export")}
-                </Button>
+              <DropdownMenuTrigger
+                render={<Button variant="outline" size="sm" />}
+              >
+                <DownloadIcon data-icon="inline-start" />
+                {t("detail.export")}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
                   {EXPORT_FORMATS.map((fmt) => (
                     <DropdownMenuItem
                       key={fmt}
-                      onSelect={() => void onExport(fmt)}
+                      onClick={() => void onExport(fmt)}
                     >
                       {t(`detail.exportFormats.${fmt}`)}
                     </DropdownMenuItem>
@@ -1177,14 +1178,16 @@ function MeetingDetail({
           )}
           {rec && (
             <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("review.moreActions")}
-                >
-                  <MoreHorizontalIcon data-icon="inline-start" />
-                </Button>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t("review.moreActions")}
+                  />
+                }
+              >
+                <MoreHorizontalIcon data-icon="inline-start" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
@@ -1196,14 +1199,14 @@ function MeetingDetail({
                     (surviving.length > 1 ||
                       (surviving.length === 1 &&
                         can("approve_transcript"))) && (
-                      <DropdownMenuItem onSelect={() => setRevisionsOpen(true)}>
+                      <DropdownMenuItem onClick={() => setRevisionsOpen(true)}>
                         {surviving.length > 1
                           ? t("detail.reviewRevisions")
                           : t("detail.reviewTranscript")}
                       </DropdownMenuItem>
                     )}
                   {rec.status === "completed" && can("view_transcript") && (
-                    <DropdownMenuItem onSelect={() => setCommentsOpen(true)}>
+                    <DropdownMenuItem onClick={() => setCommentsOpen(true)}>
                       {t("comments.open")}
                     </DropdownMenuItem>
                   )}
@@ -1221,7 +1224,7 @@ function MeetingDetail({
                             <DropdownMenuItem
                               key={level}
                               disabled={setSensitivity.isPending}
-                              onSelect={() => {
+                              onClick={() => {
                                 setDetailError(null);
                                 setSensitivity.mutate(level);
                               }}
@@ -1796,15 +1799,17 @@ function SegmentRow({
         <div>
           {canRelabel ? (
             <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
-              <DropdownMenuTrigger asChild={true}>
-                <Button
-                  aria-label={t("review.assignNamedSpeaker", { name })}
-                  variant="ghost"
-                  size="sm"
-                >
-                  <strong>{name}</strong>
-                  <ChevronDownIcon data-icon="inline-end" />
-                </Button>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    aria-label={t("review.assignNamedSpeaker", { name })}
+                    variant="ghost"
+                    size="sm"
+                  />
+                }
+              >
+                <strong>{name}</strong>
+                <ChevronDownIcon data-icon="inline-end" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>

@@ -28,14 +28,16 @@ export function RowActions({
   if (!items.length) return null;
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={toggleAriaLabel ?? t("rowActionsAria")}
-        >
-          <MoreVerticalIcon data-icon="inline-start" />
-        </Button>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={toggleAriaLabel ?? t("rowActionsAria")}
+          />
+        }
+      >
+        <MoreVerticalIcon data-icon="inline-start" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuGroup>
@@ -47,7 +49,7 @@ export function RowActions({
                 key={i}
                 disabled={item.isDisabled}
                 variant={item.isDanger ? "destructive" : "default"}
-                onSelect={item.onClick}
+                onClick={item.onClick}
               >
                 {item.title}
               </DropdownMenuItem>

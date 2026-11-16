@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router";
 
 import { AuthProvider } from "@/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -37,12 +37,7 @@ export function App() {
         <QueryClientProvider client={queryClient}>
           <ThemeGate>
             <TooltipProvider>
-              <BrowserRouter
-                future={{
-                  v7_startTransition: true,
-                  v7_relativeSplatPath: true,
-                }}
-              >
+              <BrowserRouter>
                 <AuthProvider>
                   {/* App-level so an active meeting recording (and its recording
                     dock) survives route changes anywhere in the SPA. */}
