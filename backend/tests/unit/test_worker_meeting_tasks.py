@@ -402,7 +402,8 @@ def test_transcribe_attempt_skips_full_pass_for_large_audio(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Audio above the STT upload cap (vLLM: 25 MB) must never be sent whole —
-    the pipeline goes straight to per-turn slices and still completes."""
+    the whole-file text comes from 30 s pieces cut in pauses instead, then the
+    per-turn slices run as usual."""
     stt = SimpleNamespace(  # would only be returned by a (forbidden) full pass
         words=[], text="", language="en", duration=None, has_word_timestamps=False
     )
@@ -419,12 +420,12 @@ def test_transcribe_attempt_skips_full_pass_for_large_audio(
     result = transcribe_attempt(str(uuid.uuid4()))
 
     assert result["status"] == "completed"
-    # No full-file call — only the per-turn slice.
-    assert calls["stt_calls"] == ["turn.wav"]
+    # No full-file call — one piece of the whole-file text, then the turn.
+    assert calls["stt_calls"] == ["window.wav", "turn.wav"]
     (seg,) = calls["segments"]
     assert seg["text"] == "turn-text-0.0-9.7"
     # Duration comes from the waveform itself (40s fake), not the STT response;
-    # language comes from the first per-turn slice.
+    # language comes from the first piece sent.
     assert calls["finish"] == [
         {"status": "completed", "duration_seconds": 40.0, "language": "en"}
     ]
@@ -2631,7 +2632,8 @@ def test_requested_language_reaches_every_transcription_request(
         monkeypatch.setattr(tasks_module.settings, "STT_MAX_UPLOAD_MB", -1)
     result = transcribe_attempt(str(uuid.uuid4()))
     assert result["status"] == "completed"
-    expected_calls = 3 if skip_full_pass else 4
+    # Skipped: three 30 s pieces of whole-file text plus three turn chunks.
+    expected_calls = 6 if skip_full_pass else 4
     assert len(calls["stt_calls"]) == expected_calls
     # Even if a server reports a different language, the saved user choice wins
     # for every later speaker turn / 30-second chunk.

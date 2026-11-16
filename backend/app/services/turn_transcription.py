@@ -59,6 +59,9 @@ JOIN_GAP_SECONDS = 0.5
 #: A joined turn stays within one request to the model (its 30 s window), so
 #: joining never creates a cut in the middle of a word.
 JOIN_MAX_SECONDS = 30.0
+#: The longest piece of audio sent at once for the whole-file text when the
+#: recording is too large for one request (the model's own window).
+WINDOW_SECONDS = 30.0
 
 
 def join_close_turns(
@@ -107,6 +110,48 @@ def clip_bounds(
     # its own end in.
     end = max(turn.end, min(duration, turn.end + tail))
     return start, end
+
+
+def window_bounds(
+    turns: Sequence[SpeakerTurn],
+    duration: float,
+    *,
+    max_seconds: float = WINDOW_SECONDS,
+    margin: float = MARGIN_SECONDS,
+) -> list[tuple[float, float]]:
+    """Cut the talk into pieces of at most ``max_seconds`` for the whole-file
+    text of a recording too large to send in one piece.
+
+    A piece ends only in a pause between turns (half-way through it, at most
+    ``margin`` after the speech), so no word is cut in two. Speech that runs
+    on for longer than ``max_seconds`` without any pause is cut every
+    ``max_seconds``, like the speech server would. Silence longer than the
+    margins is left out.
+    """
+    # Stretches of speech: overlapping or touching turns are one stretch.
+    spans: list[list[float]] = []
+    for turn in sorted(turns, key=lambda t: (t.start, t.end)):
+        if spans and turn.start <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], turn.end)
+        else:
+            spans.append([turn.start, turn.end])
+    windows: list[tuple[float, float]] = []
+    for index, (start, end) in enumerate(spans):
+        lead = margin if index == 0 else min(margin, (start - spans[index - 1][1]) / 2)
+        tail = (
+            margin
+            if index + 1 == len(spans)
+            else min(margin, (spans[index + 1][0] - end) / 2)
+        )
+        start, end = max(0.0, start - lead), max(end, min(duration, end + tail))
+        if windows and end - windows[-1][0] <= max_seconds:
+            windows[-1] = (windows[-1][0], end)  # the pause in between goes too
+            continue
+        while end - start > max_seconds:
+            windows.append((start, start + max_seconds))
+            start += max_seconds
+        windows.append((start, end))
+    return windows
 
 
 def context_bounds(

@@ -603,15 +603,37 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                 # Word timestamps present: one-pass whisperX-style alignment.
                 aligned = align(stt.words, turns)
         else:
+            # Too large for one request: the whole-file text is still needed
+            # (it is the reference that completes the turns below), so it is
+            # transcribed in pieces of at most 30 s, cut only in pauses.
+            _step("transcribing", "transcribe")
+            windows = turn_stt.window_bounds(turns, wav_duration)
             logger.info(
-                "audio exceeds the STT upload cap — skipping the full pass",
+                "audio exceeds the STT upload cap — whole-file text in pieces",
                 extra={
-                    "operation": "meeting.stt_full_pass_skipped",
+                    "operation": "meeting.stt_full_pass_windowed",
                     "bytes": wav_size,
                     "max_upload_mb": settings.STT_MAX_UPLOAD_MB,
+                    "windows": len(windows),
                     "recording_id": recording_id,
                 },
             )
+            pieces: list[str] = []
+            for start, end in windows:
+                with session_scope() as session:
+                    transcription_attempt_crud.heartbeat_sync(
+                        session, aid, step="transcribe"
+                    )
+                piece = service.transcribe_sync(
+                    slice_wav(wav_path, start, end, turn_stt.SILENCE_SECONDS),
+                    "window.wav",
+                    language=requested_language,
+                )
+                if language is None:
+                    language = piece.language
+                if piece.text.strip():
+                    pieces.append(piece.text.strip())
+            full_text = " ".join(pieces)
 
         if aligned is None:
             # Per-turn transcription: no word timestamps (vLLM whisper — its

@@ -255,6 +255,32 @@ def test_same_speaker_turns_with_almost_no_pause_are_joined() -> None:
     assert join_close_turns([]) == []
 
 
+def test_long_recordings_are_cut_into_windows_only_in_pauses() -> None:
+    from app.services.turn_transcription import window_bounds
+
+    turns = [
+        SpeakerTurn("A", 1.0, 12.0),
+        SpeakerTurn("B", 11.5, 20.0),  # talks over A: one stretch with A
+        SpeakerTurn("A", 20.5, 28.0),
+        SpeakerTurn("B", 29.0, 40.0),  # would pass 30 s: a new window
+        SpeakerTurn("A", 100.0, 101.0),  # after a long silence
+    ]
+    windows = [(round(a, 2), round(b, 2)) for a, b in window_bounds(turns, 120.0)]
+    # Each window ends half-way into a pause (at most 0.2 s past the speech).
+    assert windows == [(0.8, 28.2), (28.8, 40.2), (99.8, 101.2)]
+    for start, end in windows:
+        assert end - start <= 30.0
+        # No turn edge falls inside a window's cut.
+        for turn in turns:
+            assert not turn.start < start < turn.end
+            assert not turn.start < end < turn.end
+
+    # Talk without a single pause is cut every 30 s, as the server would.
+    windows = window_bounds([SpeakerTurn("A", 0.0, 70.0)], 70.0)
+    assert windows == [(0.0, 30.0), (30.0, 60.0), (60.0, 70.0)]
+    assert window_bounds([], 10.0) == []
+
+
 FULL = (
     " Hej! Hej! Jag heter Peter. Vad heter du? Jag heter Gunilla. Hur mår du "
     "Gunilla idag? Jag mår bra, men lite trött. Hur mår du? Jag mår också bra. "
