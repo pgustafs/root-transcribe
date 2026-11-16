@@ -524,6 +524,23 @@
   .meeting-seg-active {
     @apply border-l-accent-line bg-foreground/5;
   }
+  /* The "Cleaned" tab. Green/orange mark a correction on the edge and behind
+     the words; the words themselves keep the text colour. */
+  .cleanup-panel {
+    @apply mx-auto flex max-w-3xl flex-col gap-4;
+  }
+  .cleanup-seg--changed {
+    @apply border-l-status-ok;
+  }
+  .cleanup-seg--kept {
+    @apply border-l-border;
+  }
+  .cleanup-word--removed {
+    @apply rounded-sm bg-warning-surface px-0.5 line-through decoration-status-warn;
+  }
+  .cleanup-word--added {
+    @apply rounded-sm bg-success-surface px-0.5 no-underline;
+  }
   .transcript-text {
     @apply px-2 text-base leading-7 text-body whitespace-pre-wrap wrap-anywhere;
   }

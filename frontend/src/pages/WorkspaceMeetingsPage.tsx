@@ -125,6 +125,7 @@ import {
 } from "@/lib/recordingPreflight";
 import { downloadBlob } from "@/utils/downloadBlob";
 
+import { MeetingCleanedPanel } from "@/components/workspace/MeetingCleanedPanel";
 import { MeetingClipsPanel } from "@/components/workspace/MeetingClipsPanel";
 import { MeetingNotesPanel } from "@/components/workspace/MeetingNotesPanel";
 import { MeetingCommentsDrawer } from "@/components/workspace/MeetingCommentsDrawer";
@@ -1008,14 +1009,17 @@ function MeetingDetail({
   const [searchParams] = useSearchParams();
   const deepLinkAppliedRef = useRef(false);
   // Transcript, clips or sensitive-content review; ?tab= deep-links.
-  const [view, setView] = useState<"transcript" | "notes" | "clips" | "dlp">(
-    () => {
-      const tab = searchParams.get("tab");
-      return tab === "notes" || tab === "clips" || tab === "dlp"
-        ? tab
-        : "transcript";
-    },
-  );
+  const [view, setView] = useState<
+    "transcript" | "cleaned" | "notes" | "clips" | "dlp"
+  >(() => {
+    const tab = searchParams.get("tab");
+    return tab === "cleaned" ||
+      tab === "notes" ||
+      tab === "clips" ||
+      tab === "dlp"
+      ? tab
+      : "transcript";
+  });
   const [playbackRate, setPlaybackRate] = useState(1);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -1565,6 +1569,7 @@ function MeetingDetail({
               <TabsTrigger value="transcript">
                 {t("review.transcript")}
               </TabsTrigger>
+              <TabsTrigger value="cleaned">{t("cleanup.tab")}</TabsTrigger>
               <TabsTrigger value="notes">{t("notes:tab")}</TabsTrigger>
               <TabsTrigger value="clips">{t("clips.viewClips")}</TabsTrigger>
               {can("redact") && (
@@ -1726,6 +1731,18 @@ function MeetingDetail({
                     </div>
                   </DataState>
                 </div>
+              )}
+            </TabsContent>
+            <TabsContent value="cleaned" className="transcript-scroll">
+              {view === "cleaned" && (
+                <MeetingCleanedPanel
+                  workspaceId={workspaceId}
+                  recordingId={recordingId}
+                  segments={rec.segments}
+                  canCreate={can("create_notes")}
+                  isAvailable={config.data?.notes_status === "available"}
+                  onSeek={seekTo}
+                />
               )}
             </TabsContent>
             <TabsContent value="notes" className="transcript-scroll">

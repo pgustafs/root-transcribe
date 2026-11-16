@@ -300,6 +300,9 @@ it("switches review tabs by keyboard while preserving transcript filters", async
     http.get("*/api/v1/workspaces/w1/recordings/r1/notes", () =>
       HttpResponse.json([]),
     ),
+    http.get("*/api/v1/workspaces/w1/recordings/r1/cleanup", () =>
+      HttpResponse.json(null),
+    ),
   );
   const actor = userEvent.setup();
   showPage();
@@ -309,7 +312,14 @@ it("switches review tabs by keyboard while preserving transcript filters", async
     "first",
   );
   transcript.focus();
-  // Transcript → Notes → Clips
+  // Transcript → Cleaned → Notes → Clips
+  await actor.keyboard("{ArrowRight}");
+  await waitFor(() =>
+    expect(screen.getByRole("tab", { name: "Cleaned" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    ),
+  );
   await actor.keyboard("{ArrowRight}");
   await waitFor(() =>
     expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute(
@@ -328,7 +338,7 @@ it("switches review tabs by keyboard while preserving transcript filters", async
   expect(
     screen.queryByText(recording.segments[0].text),
   ).not.toBeInTheDocument();
-  await actor.keyboard("{ArrowLeft}{ArrowLeft}");
+  await actor.keyboard("{ArrowLeft}{ArrowLeft}{ArrowLeft}");
   await waitFor(() =>
     expect(transcript).toHaveAttribute("aria-selected", "true"),
   );
