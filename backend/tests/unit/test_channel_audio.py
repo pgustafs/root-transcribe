@@ -12,6 +12,7 @@ from app.services.channel_audio import (  # noqa: E402
     channels_differ,
     drop_echo,
     is_echo,
+    mute,
     relabel,
 )
 
@@ -93,17 +94,20 @@ def test_echo_turns_are_left_out_and_real_ones_kept() -> None:
         SpeakerTurn("SPEAKER_00", 14.0, 14.3),  # a blip
     ]
     kept, dropped = drop_echo(turns, mic, call, RATE)
-    assert dropped == 1
+    assert dropped == turns[:1]
     assert kept == turns[1:]
+    # The echo is silenced in the audio as well, so nothing that listens to
+    # the whole channel later hears the call there; the rest is untouched.
+    before = mic.copy()
+    mute(mic, dropped, RATE)
+    assert not mic[int(1.1 * RATE) : 4 * RATE].any()
+    assert (mic[5 * RATE : 8 * RATE] == before[5 * RATE : 8 * RATE]).all()
+    assert (mic[: int(1.1 * RATE)] == before[: int(1.1 * RATE)]).all()
     # A turn at the very start of the recording is judged like any other.
     early = np.concatenate([voice(2, 6), silence(1)])
-    assert drop_echo(
-        [SpeakerTurn("SPEAKER_00", 0.1, 2.0)], echo_of(early), early, RATE
-    ) == (
-        [],
-        1,
-    )
-    assert drop_echo([], mic, call, RATE) == ([], 0)
+    start = [SpeakerTurn("SPEAKER_00", 0.1, 2.0)]
+    assert drop_echo(start, echo_of(early), early, RATE) == ([], start)
+    assert drop_echo([], mic, call, RATE) == ([], [])
 
 
 def test_speakers_of_two_channels_get_labels_that_do_not_collide() -> None:

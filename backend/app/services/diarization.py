@@ -203,6 +203,14 @@ def slice_wav(wav_path: str, start: float, end: float, pad: float = 0.0) -> byte
     return buf.getvalue()
 
 
+def save_wav(wav_path: str, samples, sample_rate: int) -> None:
+    """Write mono float samples over a 16-bit WAV (a channel with stretches
+    silenced, for the speech model to read)."""
+    import soundfile as sf
+
+    sf.write(wav_path, samples, sample_rate, subtype="PCM_16")
+
+
 def load_waveform(wav_path: str) -> dict:
     """Load a WAV into a pyannote audio dict.
 

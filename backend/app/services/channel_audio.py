@@ -130,13 +130,14 @@ def drop_echo(
     mic: np.ndarray,
     tab: np.ndarray,
     sample_rate: int,
-) -> tuple[list[SpeakerTurn], int]:
+) -> tuple[list[SpeakerTurn], list[SpeakerTurn]]:
     """The microphone channel's turns without those that are the call's echo.
-    Returns the turns kept and how many were left out."""
+    Returns the turns kept and the turns left out (see :func:`mute`)."""
     import numpy as np
 
     lead = int(MAX_ECHO_DELAY_SECONDS * sample_rate)
     kept: list[SpeakerTurn] = []
+    echoes: list[SpeakerTurn] = []
     for turn in turns:
         start = max(0, int(turn.start * sample_rate))
         end = min(len(mic), int(turn.end * sample_rate))
@@ -147,9 +148,24 @@ def drop_echo(
         if start - before < lead:
             tab_part = np.concatenate([np.zeros(lead - (start - before)), tab_part])
         if is_echo(mic[start:end], tab_part, sample_rate):
-            continue
-        kept.append(turn)
-    return kept, len(turns) - len(kept)
+            echoes.append(turn)
+        else:
+            kept.append(turn)
+    return kept, echoes
+
+
+def mute(samples: np.ndarray, turns: Sequence[SpeakerTurn], sample_rate: int) -> None:
+    """Silence ``turns`` in ``samples``, in place.
+
+    Leaving an echo's turn out is not enough: whatever listens to the whole
+    channel afterwards (the whole-file text that completes the turns, the
+    margin around a neighbouring turn's clip) still hears the call there and
+    writes its words down under the people at the microphone.
+    """
+    for turn in turns:
+        start = max(0, int(turn.start * sample_rate))
+        end = min(len(samples), int(turn.end * sample_rate))
+        samples[start:end] = 0
 
 
 def relabel(

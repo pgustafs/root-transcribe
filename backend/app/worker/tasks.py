@@ -443,6 +443,7 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
         get_embedding_service,
         load_waveform,
         probe_wav,
+        save_wav,
         slice_wav,
     )
     from app.services.transcript_align import Segment as AlignedSegment
@@ -883,9 +884,16 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
             _step("diarizing", "diarize")
             mic_turns = _detect(mic_audio, mic_speakers)
             # The call heard through the loudspeakers is not someone here.
+            rate = int(mic_audio["sample_rate"])
             mic_turns, echoes = channel_audio.drop_echo(
-                mic_turns, mic_samples, tab_samples, int(mic_audio["sample_rate"])
+                mic_turns, mic_samples, tab_samples, rate
             )
+            if echoes:
+                # Silence them in the audio too (the samples are the loaded
+                # waveform's own), and in the file the speech model reads:
+                # otherwise the whole-file text still hears the call there.
+                channel_audio.mute(mic_samples, echoes, rate)
+                save_wav(channel_paths[0], mic_samples, rate)
             mic_turns, mic_labels = channel_audio.relabel(mic_turns, 0)
             tab_turns = _detect(tab_audio, expected_speakers)
             tab_turns, tab_labels = channel_audio.relabel(tab_turns, len(mic_labels))
@@ -897,7 +905,7 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                     "mic_speakers": len(mic_labels),
                     "tab_turns": len(tab_turns),
                     "tab_speakers": len(tab_labels),
-                    "echo_turns_dropped": echoes,
+                    "echo_turns_dropped": len(echoes),
                     "recording_id": recording_id,
                 },
             )

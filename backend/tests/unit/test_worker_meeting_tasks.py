@@ -104,6 +104,13 @@ def _wire_pipeline(
     monkeypatch.setattr(
         tasks_module, "_full_name_sync", lambda session, user_id: owner_name
     )
+    calls["saved_wavs"] = []
+    monkeypatch.setattr(
+        "app.services.diarization.save_wav",
+        lambda path, samples, rate: calls["saved_wavs"].append(
+            (side_of.get(path), samples.copy())
+        ),
+    )
 
     def _load(path):
         side = side_of.get(path)
@@ -619,6 +626,12 @@ def test_the_call_heard_through_the_loudspeakers_is_not_transcribed_twice(
         ("SPEAKER_01", 1000),  # the call, once
         ("SPEAKER_00", 5000),  # the answer here
     ]
+    # The echo is silenced in the microphone's audio before any of it is
+    # transcribed, so the whole-file text cannot bring its words back.
+    ((side, saved),) = calls["saved_wavs"]
+    assert side == "mic"
+    assert not saved[int(1.1 * 16000) : 4 * 16000].any()
+    assert saved[5 * 16000 : 8 * 16000].any()
 
 
 def test_a_recording_whose_channels_are_one_mix_goes_the_ordinary_way(
