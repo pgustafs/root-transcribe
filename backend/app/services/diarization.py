@@ -116,6 +116,53 @@ def decode_file_to_wav(
     return out_path
 
 
+def decode_file_to_channel_wavs(
+    in_path: str, *, max_seconds: float | None = None
+) -> tuple[str, str]:
+    """File→files decode of a stereo recording into two mono 16 kHz WAVs,
+    (left, right): the two sources of an online-meeting recording, kept apart
+    (see ``channel_audio``). Bounded like :func:`decode_file_to_wav`.
+
+    A mono input gives the same signal twice; the caller checks that the
+    channels differ before treating them as two sources.
+    """
+    import imageio_ffmpeg
+
+    from app.services import media_validation
+
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    paths = []
+    for _ in range(2):
+        fd, path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        paths.append(path)
+    limit = ["-t", f"{max_seconds + 1:.0f}"] if max_seconds is not None else []
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        in_path,
+        "-filter_complex",
+        # Whatever the input layout, lay it out as stereo first, then split.
+        "[0:a]aformat=channel_layouts=stereo,channelsplit=channel_layout=stereo[l][r]",
+    ]
+    for label, path in zip(("[l]", "[r]"), paths, strict=True):
+        cmd += ["-map", label, "-ar", "16000", *limit, path]
+    try:
+        with log_operation(logger, "audio.decode_channel_wavs"):
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                # Sanitized like decode_file_to_wav: never the ffmpeg command.
+                raise media_validation.classify_decode_failure(exc) from None
+    except BaseException:
+        for path in paths:
+            with contextlib.suppress(OSError):
+                os.remove(path)
+        raise
+    return paths[0], paths[1]
+
+
 def probe_wav(wav_path: str) -> tuple[float, int]:
     """(duration_seconds, sample_rate) from the WAV header only — the
     post-decode guard that enforces duration limits BEFORE anything loads the
@@ -156,6 +203,14 @@ def slice_wav(wav_path: str, start: float, end: float, pad: float = 0.0) -> byte
     return buf.getvalue()
 
 
+def save_wav(wav_path: str, samples, sample_rate: int) -> None:
+    """Write mono float samples over a 16-bit WAV (a channel with stretches
+    silenced, for the speech model to read)."""
+    import soundfile as sf
+
+    sf.write(wav_path, samples, sample_rate, subtype="PCM_16")
+
+
 def load_waveform(wav_path: str) -> dict:
     """Load a WAV into a pyannote audio dict.
 
@@ -178,6 +233,35 @@ class DiarizationService:
 
     def __init__(self) -> None:
         self._pipeline = None
+        self._speech = None
+
+    def speech_sync(
+        self, audio: dict, *, label: str = "SPEAKER_00"
+    ) -> list[SpeakerTurn]:
+        """Where someone is speaking, as turns of one speaker.
+
+        For audio known to hold one person (a count of 1, or one side of an
+        online meeting): the question is only *when* there is speech, which the
+        pipeline's own segmentation model answers by itself. Telling voices
+        apart is the slow part of speaker detection (measured on a 42-minute
+        meeting: about 28 minutes on CPU, against 2 for this) and is skipped.
+        """
+        if self._speech is None:
+            from pyannote.audio.pipelines import VoiceActivityDetection
+
+            pipeline = self._load()
+            with log_operation(logger, "diarization.load_speech_detection"):
+                speech = VoiceActivityDetection(
+                    segmentation=pipeline._segmentation.model
+                )
+                speech.instantiate({"min_duration_on": 0.0, "min_duration_off": 0.0})
+                self._speech = speech
+        with log_operation(logger, "diarization.speech"):
+            regions = self._speech(audio).get_timeline().support()
+        return [
+            SpeakerTurn(speaker=label, start=float(r.start), end=float(r.end))
+            for r in regions
+        ]
 
     def _load(self):
         if self._pipeline is None:

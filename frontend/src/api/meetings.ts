@@ -2,6 +2,7 @@
 
 import { apiClient } from "@/api/client";
 import type {
+  AudioLayout,
   DlpFinding,
   DlpTerm,
   SpeakerNameRun,
@@ -152,13 +153,16 @@ export async function createRecording(
 export async function retryRecording(
   workspaceId: string,
   recordingId: string,
-  /** Change how many people speak (null: detect); left out, it is kept. */
-  options?: { expectedSpeakers?: number | null },
+  /** Change how many people speak (null: detect); a count left out is kept.
+   * `micSpeakers` is the microphone side of an online-meeting recording. */
+  options?: { expectedSpeakers?: number | null; micSpeakers?: number | null },
 ): Promise<MeetingRecording> {
-  const body =
-    options && "expectedSpeakers" in options
-      ? { expected_speakers: options.expectedSpeakers ?? null }
-      : undefined;
+  const fields: Record<string, number | null> = {};
+  if (options && "expectedSpeakers" in options)
+    fields.expected_speakers = options.expectedSpeakers ?? null;
+  if (options && "micSpeakers" in options)
+    fields.mic_speakers = options.micSpeakers ?? null;
+  const body = Object.keys(fields).length > 0 ? fields : undefined;
   const { data } = await apiClient.post<MeetingRecording>(
     `/workspaces/${workspaceId}/recordings/${recordingId}/retry`,
     body,
@@ -296,6 +300,8 @@ export async function createUploadSession(
     participant_consent: boolean;
     requested_language?: RecordingLanguage;
     expected_speakers?: number | null;
+    audio_layout?: AudioLayout;
+    mic_speakers?: number | null;
   },
 ): Promise<MeetingUploadSession> {
   const { data } = await apiClient.post<MeetingUploadSession>(

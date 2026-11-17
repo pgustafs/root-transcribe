@@ -136,6 +136,7 @@ import { SpeakersDialog } from "@/components/workspace/SpeakersDialog";
 import { RecordingGuide } from "@/components/RecordingGuide";
 import { speakerLabel } from "@/utils/speakerLabel";
 import { useConfig } from "@/hooks/useConfig";
+import { useMonoPlayback } from "@/hooks/useMonoPlayback";
 import {
   meetingKeys,
   useAcceptSpeakerSuggestion,
@@ -287,6 +288,8 @@ export function WorkspaceMeetingsPage() {
   // Retry asks how many people speak (pre-filled with the current choice).
   const [retrying, setRetrying] = useState<MeetingRecording | null>(null);
   const [retrySpeakers, setRetrySpeakers] = useState<number | null>(null);
+  // An online-meeting recording counts the people at the microphone apart.
+  const [retryMicSpeakers, setRetryMicSpeakers] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const toast = useToast();
@@ -422,6 +425,7 @@ export function WorkspaceMeetingsPage() {
 
   const retryRecording = (r: MeetingRecording) => {
     setRetrySpeakers(r.expected_speakers ?? null);
+    setRetryMicSpeakers(r.mic_speakers ?? null);
     setRetrying(r);
   };
 
@@ -431,7 +435,13 @@ export function WorkspaceMeetingsPage() {
     setRetrying(null);
     setActionError(null);
     retry.mutate(
-      { recordingId: r.id, expectedSpeakers: retrySpeakers },
+      {
+        recordingId: r.id,
+        expectedSpeakers: retrySpeakers,
+        ...(r.audio_layout === "mic_tab"
+          ? { micSpeakers: retryMicSpeakers }
+          : {}),
+      },
       {
         onSuccess: () => toast.success(t("toast.retried", { name: r.title })),
         onError: (error) =>
@@ -928,10 +938,25 @@ export function WorkspaceMeetingsPage() {
                 <p id="retry-body" className="app-copy break-words">
                   {t("recordingSpeakers.retryHint")}
                 </p>
-                <RecordingSpeakersField
-                  value={retrySpeakers}
-                  onChange={setRetrySpeakers}
-                />
+                {retrying.audio_layout === "mic_tab" ? (
+                  <>
+                    <RecordingSpeakersField
+                      side="here"
+                      value={retryMicSpeakers}
+                      onChange={setRetryMicSpeakers}
+                    />
+                    <RecordingSpeakersField
+                      side="call"
+                      value={retrySpeakers}
+                      onChange={setRetrySpeakers}
+                    />
+                  </>
+                ) : (
+                  <RecordingSpeakersField
+                    value={retrySpeakers}
+                    onChange={setRetrySpeakers}
+                  />
+                )}
               </FieldGroup>
             </div>
             <DialogFooter>
@@ -1090,6 +1115,9 @@ function MeetingDetail({
   );
 
   const rec = detail.data;
+  // An online meeting has the microphone in one channel and the call in the
+  // other: fold them, or the two sides play in one ear each.
+  useMonoPlayback(audioRef, rec?.audio_layout === "mic_tab", audioUrl);
   const isProcessing = rec ? !TERMINAL.includes(rec.status) : true;
   // Playback is available for ANY terminal recording whose audio still exists —
   // including failed ones (hearing the audio helps diagnose a failure).

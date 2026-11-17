@@ -2629,3 +2629,61 @@ async def test_expected_speakers_persisted_and_validated(
         f"{API}/workspaces/{wid}/recordings/{rid}", headers=user_token_headers
     )
     assert detail.json()["expected_speakers"] == expected_speakers
+
+
+@pytest.mark.parametrize("resumable", [False, True])
+async def test_audio_layout_is_stored_with_the_microphone_side_count(
+    client,
+    user_token_headers,
+    meetings_enabled,
+    db_session,
+    resumable,
+):
+    """What the channels hold comes with the recording. The count of people at
+    the microphone only means something for an online-meeting recording."""
+    wid = await _make_workspace(client, user_token_headers)
+
+    async def record(**fields):
+        data = {"title": "Meet", "participant_consent": True, **fields}
+        if resumable:
+            return await client.post(
+                f"{API}/workspaces/{wid}/meetings/uploads",
+                headers=user_token_headers,
+                json={**data, "filename": "m.webm"},
+            )
+        return await client.post(
+            f"{API}/workspaces/{wid}/recordings",
+            headers=user_token_headers,
+            data=data,
+            files={"file": ("m.webm", b"fake-audio-bytes", "audio/webm")},
+        )
+
+    async def stored(response):
+        assert response.status_code == (201 if resumable else 202), response.text
+        rid = response.json()["recording_id" if resumable else "id"]
+        row = await db_session.get(MeetingRecording, uuid.UUID(rid))
+        detail = await client.get(
+            f"{API}/workspaces/{wid}/recordings/{rid}", headers=user_token_headers
+        )
+        assert detail.json()["audio_layout"] == row.audio_layout
+        assert detail.json()["mic_speakers"] == row.mic_speakers
+        return row.audio_layout, row.mic_speakers, row.expected_speakers
+
+    # Nothing said: one mix, as every recording so far.
+    assert await stored(await record()) == ("mixed", None, None)
+    # An online meeting: just me here, two people in the call.
+    assert await stored(
+        await record(audio_layout="mic_tab", mic_speakers=1, expected_speakers=2)
+    ) == ("mic_tab", 1, 2)
+    # A tab only: there is no microphone side to count.
+    assert await stored(await record(audio_layout="tab", mic_speakers=3)) == (
+        "tab",
+        None,
+        None,
+    )
+    for bad in (
+        {"audio_layout": "surround"},
+        {"mic_speakers": 0},
+        {"mic_speakers": 11},
+    ):
+        assert (await record(**bad)).status_code == 422, bad

@@ -1,7 +1,11 @@
 /**
- * Audio capture via the MediaRecorder API, with optional tab/system-audio
- * mixing (record another browser tab + your mic together, Chrome/Edge). Prefers
- * Opus in a WebM container. The server converts to WAV for STT/diarization.
+ * Audio capture via the MediaRecorder API: the microphone, another browser
+ * tab (Chrome/Edge), or both. Prefers Opus in a WebM container. The server
+ * converts to WAV for STT/diarization.
+ *
+ * Recording both (an online meeting) keeps them apart: the microphone on the
+ * left channel, the tab on the right. Who is here and who is in the call is
+ * then known from the channel instead of guessed from the voices.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -34,8 +38,13 @@ export type ChunkMeta = {
   timecode: number | null;
 };
 
+/** What is recorded: the people in this room, an online meeting (this room's
+ * microphone and the meeting's tab, on separate channels), or a tab alone
+ * (the microphone is never opened). */
+export type RecordingSource = "mic" | "mic_tab" | "tab";
+
 export type StartOptions = {
-  includeTabAudio?: boolean;
+  source?: RecordingSource;
   /** Specific input device (from listAudioInputs); default mic otherwise. */
   deviceId?: string;
   /** Receives every timeslice as it lands (IndexedDB persistence, issue #6). */
@@ -137,7 +146,11 @@ export function useMediaRecorder() {
   // notes read the original tracks; "Change source" swaps them.
   const displayRef = useRef<MediaStream | null>(null);
   const tabSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const mixRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  // Where the tab's audio goes in: the node and which of its inputs (the
+  // right channel of the microphone/tab pair, or the recording itself).
+  const mixRef = useRef<AudioNode | null>(null);
+  const tabInputRef = useRef(0);
+  const micRef = useRef<MediaStream | null>(null);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -159,9 +172,10 @@ export function useMediaRecorder() {
     displayRef.current = null;
     tabSourceRef.current = null;
     mixRef.current = null;
+    micRef.current = null;
   }, []);
 
-  /** Wire a shared tab into the mix and watch its tracks. */
+  /** Wire a shared tab into the recording and watch its tracks. */
   const attachDisplay = useCallback(
     (display: MediaStream, ctx: AudioContext, dest: AudioNode) => {
       displayRef.current = display;
@@ -170,7 +184,7 @@ export function useMediaRecorder() {
       tabSourceRef.current = null;
       if (hasTabAudio) {
         const source = ctx.createMediaStreamSource(display);
-        source.connect(dest);
+        source.connect(dest, 0, tabInputRef.current);
         tabSourceRef.current = source;
       }
       // Any of its tracks ending means the sharing stopped.
@@ -185,7 +199,7 @@ export function useMediaRecorder() {
     // Returns true when recording is live (callers branch on it immediately —
     // reading the `error` state after the await would be a stale closure).
     async ({
-      includeTabAudio = false,
+      source = "mic",
       deviceId,
       onChunk,
       onStart,
@@ -200,31 +214,53 @@ export function useMediaRecorder() {
         return false;
       }
       try {
-        const mic = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-          },
-        });
-        streamsRef.current = [mic];
-        let recordStream: MediaStream = mic;
-        // A required track dying mid-meeting (device unplugged, share stopped)
-        // must warn immediately, not silently record silence (issue #6).
-        mic.getAudioTracks().forEach((track) => {
-          track.onended = () => setTrackWarning("mic-ended");
-        });
-
-        if (includeTabAudio) {
-          // Capture another tab/window/screen and mix its audio with the mic.
+        streamsRef.current = [];
+        let mic: MediaStream | null = null;
+        if (source !== "tab") {
+          // A tab alone needs no microphone: it is never asked for.
+          mic = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+            },
+          });
+          micRef.current = mic;
+          streamsRef.current.push(mic);
+          // A required track dying mid-meeting (device unplugged, share
+          // stopped) must warn immediately, not silently record silence
+          // (issue #6).
+          mic.getAudioTracks().forEach((track) => {
+            track.onended = () => setTrackWarning("mic-ended");
+          });
+        }
+        let recordStream: MediaStream;
+        if (mic && source === "mic") {
+          recordStream = mic;
+        } else {
           const display = await requestDisplay(keepFocus);
           streamsRef.current.push(display);
           const ctx = new AudioContext();
           audioCtxRef.current = ctx;
           const dest = ctx.createMediaStreamDestination();
-          mixRef.current = dest;
-          ctx.createMediaStreamSource(mic).connect(dest);
-          attachDisplay(display, ctx, dest);
+          if (mic) {
+            // An online meeting: the microphone on the left channel, the tab
+            // on the right. Each input of the merger is one channel.
+            const pair = ctx.createChannelMerger(2);
+            ctx.createMediaStreamSource(mic).connect(pair, 0, 0);
+            pair.connect(dest);
+            mixRef.current = pair;
+            tabInputRef.current = 1;
+          } else {
+            mixRef.current = dest;
+            tabInputRef.current = 0;
+          }
+          attachDisplay(display, ctx, mixRef.current);
+          if (!mic && display.getAudioTracks().length === 0) {
+            // A tab alone, shared without its audio: there is nothing to
+            // record. Say so instead of saving silence.
+            throw new Error("tab-no-audio");
+          }
           recordStream = dest.stream;
         }
 
@@ -297,8 +333,9 @@ export function useMediaRecorder() {
   /** The shared tab's stream (its original video and audio tracks). */
   const getDisplayStream = useCallback(() => displayRef.current, []);
 
-  /** The microphone's own stream (notes in a recording without a shared tab). */
-  const getMicStream = useCallback(() => streamsRef.current[0] ?? null, []);
+  /** The microphone's own stream (notes in a recording without a shared tab);
+   * null when only a tab is recorded. */
+  const getMicStream = useCallback(() => micRef.current, []);
 
   /**
    * Share another tab mid-recording ("Change source"). The meeting recording

@@ -70,6 +70,18 @@ class MeetingRecording(Base):
     # detection decide. A wrong automatic count invents a speaker out of quiet
     # or overlapping speech, or merges two people.
     expected_speakers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # What the audio's channels hold. ``mixed``: everything in one signal (all
+    # uploads, and recordings made before channels were kept apart).
+    # ``mic_tab``: an online meeting, the microphone on the left channel and
+    # the meeting tab on the right, so who is "here" and who is "in the call"
+    # is known from the channel instead of guessed from the voices. ``mic`` /
+    # ``tab``: only that source was recorded.
+    audio_layout: Mapped[str] = mapped_column(
+        String(16), default="mixed", server_default="mixed", nullable=False
+    )
+    # ``mic_tab`` only: how many people speak at the microphone (NULL: detect).
+    # ``expected_speakers`` then counts the people in the call.
+    mic_speakers: Mapped[int | None] = mapped_column(Integer, nullable=True)
     language: Mapped[str | None] = mapped_column(String(16), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

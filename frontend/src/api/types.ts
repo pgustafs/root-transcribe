@@ -116,6 +116,8 @@ export type MeetingStatus =
 
 export type RecordingLanguage = "auto" | "en" | "sv";
 
+export type AudioLayout = "mixed" | "mic_tab" | "mic" | "tab";
+
 /** A meeting recording and its transcription state (the poll payload). */
 export type MeetingRecording = {
   id: string;
@@ -125,8 +127,14 @@ export type MeetingRecording = {
   current_step: string | null;
   duration_seconds: number | null;
   requested_language?: RecordingLanguage;
-  /** How many people speak, when the user said so; null: detected. */
+  /** How many people speak, when the user said so; null: detected. For an
+   * online-meeting recording: the people in the call. */
   expected_speakers?: number | null;
+  /** What the audio's channels hold. `mic_tab`: an online meeting, the
+   * microphone left and the meeting tab right. `mixed`: one signal. */
+  audio_layout?: AudioLayout;
+  /** `mic_tab` only: how many people speak at the microphone; null: detected. */
+  mic_speakers?: number | null;
   language: string | null;
   size_bytes: number | null;
   /**
