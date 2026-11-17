@@ -72,7 +72,6 @@
     "title": "Record audio",
     "name": "Recording title",
     "namePlaceholder": "e.g. Weekly standup",
-    "includeTab": "Also capture another tab / window audio (Chrome, Edge)",
     "consent": "I confirm participants have been informed this meeting is being recorded",
     "start": "Start recording",
     "stop": "Stop & transcribe",
@@ -87,7 +86,18 @@
     "deviceGeneric": "Microphone {{n}}",
     "consentRequired": "This deployment requires attesting participant consent before recording can start.",
     "serviceUnavailable": "Transcription is currently unavailable, so a new recording can't be processed. Please try again shortly.",
-    "storageLockedByOtherTab": "Another tab or window of this app is still open with an older version. Close every other tab of this app and try again — your recordings are safe, so don't clear site data."
+    "storageLockedByOtherTab": "Another tab or window of this app is still open with an older version. Close every other tab of this app and try again — your recordings are safe, so don't clear site data.",
+    "source": {
+      "label": "What are you recording?",
+      "mic_tab": "An online meeting",
+      "tab": "A tab only",
+      "mic": "People in this room",
+      "mic_tabHelp": "Your microphone and the meeting's tab are recorded apart, so it is known who is here and who is in the call. Use headphones if you can. (Chrome, Edge)",
+      "tabHelp": "Only the sound of the tab you share is recorded. Your microphone stays off. (Chrome, Edge)",
+      "micHelp": "Everyone speaks into this device's microphone."
+    },
+    "tabNoAudioTitle": "The tab was shared without its sound",
+    "tabNoAudioBody": "Share the tab again and switch on “Also share tab audio” in the browser's dialog."
   },
   "detail": {
     "processing": "Processing your recording — this can take a few minutes.",
@@ -436,7 +446,15 @@
     "help": "If you know how many people speak, choose it: automatic detection can add a speaker who isn't there.",
     "retryTitle": "Transcribe again",
     "retryHint": "A new version of the transcript is made; the current one is kept.",
-    "retryConfirm": "Transcribe again"
+    "retryConfirm": "Transcribe again",
+    "here": {
+      "label": "People at your microphone",
+      "help": "Usually just you. Choose more for a meeting room that joins the call together."
+    },
+    "call": {
+      "label": "People in the call",
+      "help": "The other participants. Auto detects how many there are."
+    }
   },
   "speakerNames": {
     "title": "Speakers",

@@ -31,7 +31,11 @@ import { getConfig } from "@/api/system";
 import { Alert } from "@/components/Alert";
 import { useRecordingContext } from "@/components/recording/RecordingProvider";
 import { useConfig } from "@/hooks/useConfig";
-import { listAudioInputs } from "@/hooks/useMediaRecorder";
+import {
+  listAudioInputs,
+  type RecordingSource,
+} from "@/hooks/useMediaRecorder";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { StudyCropStep } from "@/components/study/StudyCropStep";
 import { StudySourceFields } from "@/components/study/StudySourceFields";
 import {
@@ -90,7 +94,13 @@ export function RecordMeetingModal({
   const [requestedLanguage, setRequestedLanguage] =
     useState<RecordingLanguage>("auto");
   const [expectedSpeakers, setExpectedSpeakers] = useState<number | null>(null);
-  const [includeTab, setIncludeTab] = useState(false);
+  // What is recorded. An online meeting is the usual case; with study notes
+  // it is a tab alone, unless the choice was made by hand.
+  const [source, setSource] = useState<RecordingSource>("mic_tab");
+  const [sourceChosen, setSourceChosen] = useState(false);
+  // An online meeting: the people at this microphone. Usually just one.
+  const [micSpeakers, setMicSpeakers] = useState<number | null>(1);
+  const includeTab = source !== "mic";
   const [consent, setConsent] = useState(false);
   const [starting, setStarting] = useState(false);
   const [serviceDown, setServiceDown] = useState(false);
@@ -178,10 +188,11 @@ export function RecordMeetingModal({
         workspaceId,
         study,
         title: recordingTitle,
-        includeTabAudio: includeTab,
+        source,
         consent,
         requestedLanguage,
         expectedSpeakers,
+        micSpeakers: source === "mic_tab" ? micSpeakers : null,
         deviceId: deviceId || undefined,
         onUploaded,
       });
@@ -190,7 +201,9 @@ export function RecordMeetingModal({
       if (ok) {
         setTitle("");
         setExpectedSpeakers(null);
-        setIncludeTab(false);
+        setMicSpeakers(1);
+        setSource("mic_tab");
+        setSourceChosen(false);
         setConsent(false);
         setStudyOn(false);
         setStudyChoice(EMPTY_STUDY_CHOICE);
@@ -265,11 +278,60 @@ export function RecordMeetingModal({
                 value={requestedLanguage}
                 onChange={setRequestedLanguage}
               />
-              <RecordingSpeakersField
-                value={expectedSpeakers}
-                onChange={setExpectedSpeakers}
-              />
-              {devices.length > 0 && (
+              <Field>
+                <FieldLabel id="recording-source-label">
+                  {t("recordModal.source.label")}
+                </FieldLabel>
+                <ToggleGroup
+                  variant="outline"
+                  value={[source]}
+                  aria-labelledby="recording-source-label"
+                  aria-describedby="recording-source-help"
+                  onValueChange={([next]) => {
+                    if (
+                      next === "mic_tab" ||
+                      next === "tab" ||
+                      next === "mic"
+                    ) {
+                      setSource(next);
+                      setSourceChosen(true);
+                    }
+                  }}
+                >
+                  <ToggleGroupItem value="mic_tab">
+                    {t("recordModal.source.mic_tab")}
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="tab">
+                    {t("recordModal.source.tab")}
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="mic">
+                    {t("recordModal.source.mic")}
+                  </ToggleGroupItem>
+                </ToggleGroup>
+                <FieldDescription id="recording-source-help">
+                  {t(`recordModal.source.${source}Help`)}
+                </FieldDescription>
+              </Field>
+              {source === "mic_tab" ? (
+                <>
+                  <RecordingSpeakersField
+                    side="here"
+                    value={micSpeakers}
+                    onChange={setMicSpeakers}
+                  />
+                  <RecordingSpeakersField
+                    side="call"
+                    value={expectedSpeakers}
+                    onChange={setExpectedSpeakers}
+                  />
+                </>
+              ) : (
+                <RecordingSpeakersField
+                  value={expectedSpeakers}
+                  onChange={setExpectedSpeakers}
+                />
+              )}
+              {source !== "tab" && devices.length > 0 && (
                 <Field>
                   <FieldLabel htmlFor="recording-device">
                     {t("recordModal.device")}
@@ -297,26 +359,18 @@ export function RecordMeetingModal({
                   </NativeSelect>
                 </Field>
               )}
-              <Field orientation="horizontal">
-                <Checkbox
-                  id="include-tab-audio"
-                  checked={includeTab}
-                  onCheckedChange={(state) => {
-                    const v = state === true;
-                    return setIncludeTab(v);
-                  }}
-                />
-                <FieldLabel htmlFor="include-tab-audio">
-                  {t("recordModal.includeTab")}
-                </FieldLabel>
-              </Field>
               {canStudy && (
                 <Field>
                   <Field orientation="horizontal">
                     <Switch
                       id="take-study-notes"
                       checked={studyOn}
-                      onCheckedChange={setStudyOn}
+                      onCheckedChange={(on) => {
+                        setStudyOn(on);
+                        // Notes are usually taken from a video or lecture in
+                        // a tab: no microphone then, unless chosen by hand.
+                        if (!sourceChosen) setSource(on ? "tab" : "mic_tab");
+                      }}
                       aria-describedby="take-study-notes-help"
                     />
                     <FieldLabel htmlFor="take-study-notes">
@@ -457,9 +511,15 @@ export function RecordMeetingModal({
                   variant="danger"
                   isInline={true}
                   isLiveRegion={true}
-                  title={t("recordModal.micError")}
+                  title={t(
+                    recording.error === "tab-no-audio"
+                      ? "recordModal.tabNoAudioTitle"
+                      : "recordModal.micError",
+                  )}
                 >
-                  {recording.error}
+                  {recording.error === "tab-no-audio"
+                    ? t("recordModal.tabNoAudioBody")
+                    : recording.error}
                 </Alert>
               )}
             </FieldGroup>

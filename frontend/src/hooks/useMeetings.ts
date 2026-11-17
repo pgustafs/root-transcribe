@@ -86,12 +86,22 @@ export function useRetryRecording(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (
-      input: string | { recordingId: string; expectedSpeakers: number | null },
+      input:
+        | string
+        | {
+            recordingId: string;
+            expectedSpeakers: number | null;
+            /** Only for an online-meeting recording. */
+            micSpeakers?: number | null;
+          },
     ) =>
       typeof input === "string"
         ? meetingsApi.retryRecording(workspaceId, input)
         : meetingsApi.retryRecording(workspaceId, input.recordingId, {
             expectedSpeakers: input.expectedSpeakers,
+            ...("micSpeakers" in input
+              ? { micSpeakers: input.micSpeakers ?? null }
+              : {}),
           }),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: meetingKeys.list(workspaceId) }),

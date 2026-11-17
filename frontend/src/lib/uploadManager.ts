@@ -16,7 +16,11 @@ import {
   uploadSessionPart,
 } from "@/api/meetings";
 import type { MeetingClientDiagnostics } from "@/api/meetings";
-import type { MeetingRecording, RecordingLanguage } from "@/api/types";
+import type {
+  AudioLayout,
+  MeetingRecording,
+  RecordingLanguage,
+} from "@/api/types";
 
 /** Thrown when the user cancels an upload.
  *
@@ -71,6 +75,9 @@ export async function uploadRecording(options: {
   consent: boolean;
   requestedLanguage?: RecordingLanguage;
   expectedSpeakers?: number | null;
+  /** What the channels hold (an online meeting: microphone left, tab right). */
+  audioLayout?: AudioLayout;
+  micSpeakers?: number | null;
   signal?: AbortSignal;
   resume?: ResumeInfo;
   /**
@@ -101,6 +108,8 @@ export async function uploadRecording(options: {
       participant_consent: options.consent,
       requested_language: options.requestedLanguage ?? "auto",
       expected_speakers: options.expectedSpeakers ?? null,
+      audio_layout: options.audioLayout ?? "mixed",
+      mic_speakers: options.micSpeakers ?? null,
     });
     session = {
       uploadSessionId: created.id,

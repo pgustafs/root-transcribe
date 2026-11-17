@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import type { RecordingLanguage } from "@/api/types";
+import type { AudioLayout, RecordingLanguage } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -34,7 +34,10 @@ import {
 import { Alert } from "@/components/Alert";
 import { RecordingDock } from "@/components/recording/RecordingDock";
 import { meetingKeys } from "@/hooks/useMeetings";
-import { useMediaRecorder } from "@/hooks/useMediaRecorder";
+import {
+  type RecordingSource,
+  useMediaRecorder,
+} from "@/hooks/useMediaRecorder";
 import { useNavigate } from "react-router";
 import { ChangeSourceDialog } from "@/components/study/ChangeSourceDialog";
 import { useFloatingWindow } from "@/hooks/useFloatingWindow";
@@ -89,10 +92,21 @@ import {
   uploadRecording,
 } from "@/lib/uploadManager";
 
+/** What the channels of a recording hold, as the server names it. Only an
+ * online meeting keeps two sources apart; a session saved before the source
+ * was kept is one signal. */
+function layoutOf(source: RecordingSource | undefined): AudioLayout {
+  return source ?? "mixed";
+}
+
 export type StartRecordingOptions = {
   workspaceId: string;
   title: string;
-  includeTabAudio: boolean;
+  /** The room, an online meeting (microphone + its tab, on separate
+   * channels), or a tab alone. */
+  source: RecordingSource;
+  /** An online meeting: how many people speak at the microphone. */
+  micSpeakers?: number | null;
   consent: boolean;
   requestedLanguage?: RecordingLanguage;
   /** How many people speak; null/undefined lets speaker detection decide. */
@@ -561,6 +575,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
           consent: opts.consent,
           requestedLanguage: opts.requestedLanguage ?? "auto",
           expectedSpeakers: opts.expectedSpeakers ?? null,
+          source: opts.source,
+          micSpeakers: opts.micSpeakers ?? null,
           // Provisional; the recorder reports the container it actually chose
           // via onStart below, before any chunk lands (issue #37 review).
           mimeType: "audio/webm",
@@ -578,7 +594,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       pendingWritesRef.current = [];
       emittedChunksRef.current = 0;
       const ok = await recorder.start({
-        includeTabAudio: opts.includeTabAudio,
+        source: opts.source,
         deviceId: opts.deviceId,
         // Stay on this page after the tab is picked: the crop step is next.
         keepFocus: Boolean(opts.study),
@@ -677,6 +693,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       consent: boolean;
       requestedLanguage?: RecordingLanguage;
       expectedSpeakers?: number | null;
+      source?: RecordingSource;
+      micSpeakers?: number | null;
       blob: Blob;
       filename: string;
       resumeFrom?: StoredRecordingSession;
@@ -738,6 +756,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
           consent: args.consent,
           requestedLanguage: args.requestedLanguage ?? "auto",
           expectedSpeakers: args.expectedSpeakers ?? null,
+          audioLayout: layoutOf(args.source),
+          micSpeakers: args.micSpeakers ?? null,
           signal: controller.signal,
           resume,
           // Returned (not fire-and-forget) so the manager AWAITS persistence:
@@ -968,6 +988,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       consent: target.consent,
       requestedLanguage: target.requestedLanguage ?? "auto",
       expectedSpeakers: target.expectedSpeakers ?? null,
+      source: target.source,
+      micSpeakers: target.micSpeakers ?? null,
       blob,
       filename: `meeting.${extFromMime(mimeType)}`,
       onUploaded: target.onUploaded,
@@ -1028,6 +1050,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       consent: target.consent,
       requestedLanguage: target.requestedLanguage ?? "auto",
       expectedSpeakers: target.expectedSpeakers ?? null,
+      source: target.source,
+      micSpeakers: target.micSpeakers ?? null,
       blob,
       filename: `meeting.${extFromMime(stored.mimeType)}`,
       resumeFrom: stored,
@@ -1175,10 +1199,13 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
       const recoveredTarget = {
         workspaceId: stored.workspaceId,
         title: stored.title,
-        includeTabAudio: false,
+        // Sessions from before the source was kept were microphone recordings
+        // or one mix: either way a single signal.
+        source: stored.source ?? "mic",
         consent: stored.consent,
         requestedLanguage: stored.requestedLanguage ?? "auto",
         expectedSpeakers: stored.expectedSpeakers ?? null,
+        micSpeakers: stored.micSpeakers ?? null,
       };
       // Integrity BEFORE the empty check: a session whose chunk writes were all
       // lost has 0 bytes but a non-empty `missing` list, and must be reported —
@@ -1233,6 +1260,8 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
         consent: stored.consent,
         requestedLanguage: stored.requestedLanguage ?? "auto",
         expectedSpeakers: stored.expectedSpeakers ?? null,
+        source: stored.source,
+        micSpeakers: stored.micSpeakers ?? null,
         blob,
         filename: `meeting.${extFromMime(stored.mimeType)}`,
         resumeFrom: stored,
@@ -1450,7 +1479,7 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
                         showLevel={recorder.status !== "idle"}
                         trackWarning={recorder.trackWarning}
                         noTabAudio={
-                          (target?.includeTabAudio ?? false) &&
+                          (target?.source ?? "mic") !== "mic" &&
                           recorder.tabAudioPresent === false
                         }
                         uploadProgress={uploading ? progress : null}

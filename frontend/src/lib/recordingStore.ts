@@ -1,3 +1,4 @@
+import type { RecordingSource } from "@/hooks/useMediaRecorder";
 import type { RecordingLanguage } from "@/api/types";
 /**
  * IndexedDB persistence for in-progress meeting recordings (issue #6, wave B4).
@@ -31,6 +32,9 @@ export type StoredRecordingSession = {
   consent: boolean;
   requestedLanguage?: RecordingLanguage;
   expectedSpeakers?: number | null;
+  /** What was recorded; absent on sessions from before it was kept. */
+  source?: RecordingSource;
+  micSpeakers?: number | null;
   mimeType: string;
   state: StoredRecordingState;
   /** Resumable-upload bookkeeping (set once the upload session opens). */
@@ -390,6 +394,8 @@ export async function createStoredSession(meta: {
   consent: boolean;
   requestedLanguage?: RecordingLanguage;
   expectedSpeakers?: number | null;
+  source?: RecordingSource;
+  micSpeakers?: number | null;
   mimeType: string;
   clientFamily?: string | null;
   clientMajor?: number | null;
@@ -406,6 +412,8 @@ export async function createStoredSession(meta: {
     consent: meta.consent,
     requestedLanguage: meta.requestedLanguage ?? "auto",
     expectedSpeakers: meta.expectedSpeakers ?? null,
+    source: meta.source ?? "mic",
+    micSpeakers: meta.micSpeakers ?? null,
     mimeType: meta.mimeType,
     clientFamily: meta.clientFamily ?? null,
     clientMajor: meta.clientMajor ?? null,

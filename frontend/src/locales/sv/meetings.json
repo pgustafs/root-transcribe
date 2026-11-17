@@ -72,7 +72,6 @@
     "title": "Spela in ljud",
     "name": "Inspelningens titel",
     "namePlaceholder": "t.ex. Veckoavstämning",
-    "includeTab": "Fånga även ljud från annan flik/fönster (Chrome, Edge)",
     "consent": "Jag bekräftar att deltagarna har informerats om att mötet spelas in",
     "start": "Starta inspelning",
     "stop": "Stoppa & transkribera",
@@ -87,7 +86,18 @@
     "deviceGeneric": "Mikrofon {{n}}",
     "consentRequired": "Den här installationen kräver ett intygande om deltagarnas samtycke innan inspelningen kan starta.",
     "serviceUnavailable": "Transkribering är inte tillgänglig just nu, så en ny inspelning kan inte bearbetas. Försök igen om en stund.",
-    "storageLockedByOtherTab": "En annan flik eller ett annat fönster med den här appen är öppet med en äldre version. Stäng alla andra flikar med appen och försök igen — dina inspelningar är kvar, så rensa inte webbplatsdata."
+    "storageLockedByOtherTab": "En annan flik eller ett annat fönster med den här appen är öppet med en äldre version. Stäng alla andra flikar med appen och försök igen — dina inspelningar är kvar, så rensa inte webbplatsdata.",
+    "source": {
+      "label": "Vad spelar du in?",
+      "mic_tab": "Ett onlinemöte",
+      "tab": "Bara en flik",
+      "mic": "Personer i rummet",
+      "mic_tabHelp": "Din mikrofon och mötets flik spelas in var för sig, så att det är känt vem som är här och vem som är med i samtalet. Använd gärna hörlurar. (Chrome, Edge)",
+      "tabHelp": "Bara ljudet från fliken du delar spelas in. Din mikrofon är avstängd. (Chrome, Edge)",
+      "micHelp": "Alla pratar i den här enhetens mikrofon."
+    },
+    "tabNoAudioTitle": "Fliken delades utan ljud",
+    "tabNoAudioBody": "Dela fliken igen och slå på ”Dela även flikens ljud” i webbläsarens dialogruta."
   },
   "detail": {
     "processing": "Bearbetar inspelningen — det kan ta några minuter.",
@@ -436,7 +446,15 @@
     "help": "Välj antalet om du vet hur många som pratar: automatisk identifiering kan lägga till en talare som inte finns.",
     "retryTitle": "Transkribera igen",
     "retryHint": "En ny version av transkriptet skapas; den nuvarande sparas.",
-    "retryConfirm": "Transkribera igen"
+    "retryConfirm": "Transkribera igen",
+    "here": {
+      "label": "Personer vid din mikrofon",
+      "help": "Oftast bara du. Välj fler för ett mötesrum som deltar i samtalet tillsammans."
+    },
+    "call": {
+      "label": "Personer i samtalet",
+      "help": "De andra deltagarna. Automatiskt identifierar hur många de är."
+    }
   },
   "speakerNames": {
     "title": "Talare",
