@@ -37,6 +37,8 @@ dev = [
     "httpx>=0.28.0",
     "aiosqlite>=0.20.0",
     "ruff>=0.8.0",
+    # The channel logic (services/channel_audio.py) is tested on real arrays.
+    "numpy>=1.26",
 ]
 ffmpeg = [
     "imageio-ffmpeg>=0.5.1",

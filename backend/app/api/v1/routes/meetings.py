@@ -76,6 +76,7 @@ from app.models.workspace import Workspace
 from app.schemas.meeting import (
     MAX_SPEAKERS,
     MIN_SPEAKERS,
+    AudioLayout,
     DlpFindingPublic,
     DlpFindingStatusSet,
     DlpManualFinding,
@@ -398,6 +399,8 @@ async def create_recording(
     expected_speakers: Annotated[
         int | None, Form(ge=MIN_SPEAKERS, le=MAX_SPEAKERS)
     ] = None,
+    audio_layout: Annotated[AudioLayout, Form()] = "mixed",
+    mic_speakers: Annotated[int | None, Form(ge=MIN_SPEAKERS, le=MAX_SPEAKERS)] = None,
     # Same privacy-safe recorder context the resumable path sends, as a JSON
     # form field (issue #37 r8) — otherwise a picker upload that the worker
     # later rejects would carry no client attribution at all.
@@ -478,6 +481,8 @@ async def create_recording(
         participant_consent=participant_consent,
         requested_language=requested_language,
         expected_speakers=expected_speakers,
+        audio_layout=audio_layout,
+        mic_speakers=mic_speakers,
         actor=user,
         commit=False,
     )
@@ -1040,6 +1045,9 @@ async def retry_recording(
 
     ``expected_speakers`` in the body changes how many people speech
     detection looks for (null: detect); left out, the stored choice is kept.
+    ``mic_speakers`` does the same for the microphone side of an
+    online-meeting recording. What the channels hold cannot be changed: it
+    describes the file.
 
     Safe for completed recordings since transcript revisions (issue #6): the
     rerun persists a NEW machine_candidate revision, carries human edits
@@ -1069,6 +1077,12 @@ async def retry_recording(
         )
     if payload is not None and "expected_speakers" in payload.model_fields_set:
         rec.expected_speakers = payload.expected_speakers
+    if (
+        payload is not None
+        and "mic_speakers" in payload.model_fields_set
+        and rec.audio_layout == "mic_tab"
+    ):
+        rec.mic_speakers = payload.mic_speakers
     rec.status = "pending"
     rec.error = None
     rec.error_code = None
@@ -1085,6 +1099,8 @@ async def retry_recording(
             config={
                 "filename": f"recording.{ext}",
                 "expected_speakers": rec.expected_speakers,
+                "audio_layout": rec.audio_layout,
+                "mic_speakers": rec.mic_speakers,
             },
         )
         outbox = await task_outbox_crud.enqueue(
@@ -1544,6 +1560,8 @@ async def create_upload_session(
         participant_consent=payload.participant_consent,
         requested_language=payload.requested_language,
         expected_speakers=payload.expected_speakers,
+        audio_layout=payload.audio_layout,
+        mic_speakers=payload.mic_speakers,
         actor=user,
         commit=False,
     )

@@ -399,6 +399,14 @@ def _build_speaker_centroids(
     return {pid: speaker_directory.centroid(vecs) for pid, vecs in grouped.items()}
 
 
+def _full_name_sync(session, user_id: uuid.UUID | None) -> str | None:
+    """A person's name as they wrote it, or None when they gave none."""
+    from app.models.user import User
+
+    user = session.get(User, user_id) if user_id else None
+    return ((user.full_name or "").strip() or None) if user is not None else None
+
+
 @celery_app.task(
     name="tasks.transcribe_attempt",
     soft_time_limit=settings.STT_TIMEOUT_SECONDS,
@@ -425,10 +433,11 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
     5. persist the transcript segments and mark the recording ``completed``.
     """
     task_started = time.monotonic()
-    from app.services import media_validation
+    from app.services import channel_audio, media_validation
     from app.services import turn_transcription as turn_stt
     from app.services.audio_store import get_audio_store
     from app.services.diarization import (
+        decode_file_to_channel_wavs,
         decode_file_to_wav,
         get_diarization_service,
         get_embedding_service,
@@ -460,6 +469,15 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
             None if rec.requested_language == "auto" else rec.requested_language
         )
         expected_speakers = rec.expected_speakers
+        audio_layout = rec.audio_layout
+        mic_speakers = rec.mic_speakers
+        # The person recording, for their own lines when the microphone of an
+        # online meeting is theirs alone.
+        owner_name = (
+            _full_name_sync(session, rec.created_by_id)
+            if audio_layout == "mic_tab" and mic_speakers == 1
+            else None
+        )
         # Safe operator diagnostics for a failure (issue #37): media type + byte
         # size — never audio bytes, titles, or object keys.
         size_bytes = rec.size_bytes
@@ -507,6 +525,8 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
             transcription_attempt_crud.heartbeat_sync(session, aid, step=step)
 
     wav_path: str | None = None
+    # An online meeting's two sources, each as its own WAV (microphone, tab).
+    channel_paths: tuple[str, str] | None = None
     status = "completed"
     error: str | None = None
     error_code: str | None = None
@@ -528,6 +548,8 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
         max_seconds = settings.MEETING_MAX_DURATION_MINUTES * 60
         free = shutil.disk_usage(tempfile.gettempdir()).free
         pcm_bytes = int((max_seconds + 1) * 16000 * 2)
+        if audio_layout == "mic_tab":
+            pcm_bytes *= 3  # the mix, and each channel on its own
         needed = int((int(settings.AUDIO_MAX_BYTES) + pcm_bytes) * 1.25)
         if free < needed:
             raise RuntimeError(
@@ -547,6 +569,10 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
             wav_path = decode_file_to_wav(
                 in_path, src_hint=filename, max_seconds=max_seconds
             )
+            if audio_layout == "mic_tab":
+                channel_paths = decode_file_to_channel_wavs(
+                    in_path, max_seconds=max_seconds
+                )
         finally:
             with contextlib.suppress(OSError):
                 os.remove(in_path)
@@ -569,249 +595,346 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                     f"{settings.MEETING_MAX_DURATION_MINUTES} min cap"
                 ),
             )
-        # Load once as a pyannote waveform dict (avoids its torchcodec file
-        # reader) — the one unavoidable in-memory representation: pyannote
-        # consumes the full waveform.
-        waveform = load_waveform(wav_path)
-
-        # 1. Diarization first — its turns are the backbone of attribution.
-        _step("diarizing", "diarize")
-        turns = get_diarization_service().diarize_sync(
-            waveform, num_speakers=expected_speakers
-        )
-
-        # 2+3. Speech-to-text + attribution — adaptively.
         service = get_transcription_service()
         language: str | None = None
         duration: float | None = wav_duration
-        aligned = None
-        # The whole recording as plain text, when the server gave it: the
-        # reference for what was said if turns are transcribed one by one.
-        full_text = ""
-        # The STT server caps upload size (vLLM: 25 MB ⇒ ~13 min of 16 kHz WAV;
-        # a 60-min meeting is ~115 MB), so the full-file pass only happens for
-        # files under the cap — longer meetings go straight to per-turn slices,
-        # each of which stays tiny.
-        max_upload = settings.STT_MAX_UPLOAD_MB * 1024 * 1024
-        wav_size = os.path.getsize(wav_path)
-        if wav_size <= max_upload:
-            _step("transcribing", "transcribe")
-            stt = service.transcribe_file_sync(
-                wav_path, "audio.wav", language=requested_language
-            )
-            language = stt.language
-            duration = stt.duration or wav_duration
-            full_text = str(getattr(stt, "text", "") or "")
-            if stt.has_word_timestamps:
-                # Word timestamps present: one-pass whisperX-style alignment.
-                aligned = align(stt.words, turns)
-        else:
-            # Too large for one request: the whole-file text is still needed
-            # (it is the reference that completes the turns below), so it is
-            # transcribed in pieces of at most 30 s, cut only in pauses.
-            _step("transcribing", "transcribe")
-            windows = turn_stt.window_bounds(turns, wav_duration)
-            logger.info(
-                "audio exceeds the STT upload cap — whole-file text in pieces",
-                extra={
-                    "operation": "meeting.stt_full_pass_windowed",
-                    "bytes": wav_size,
-                    "max_upload_mb": settings.STT_MAX_UPLOAD_MB,
-                    "windows": len(windows),
-                    "recording_id": recording_id,
-                },
-            )
-            pieces: list[str] = []
-            for start, end in windows:
-                with session_scope() as session:
-                    transcription_attempt_crud.heartbeat_sync(
-                        session, aid, step="transcribe"
-                    )
-                piece = service.transcribe_sync(
-                    slice_wav(wav_path, start, end, turn_stt.SILENCE_SECONDS),
-                    "window.wav",
-                    language=requested_language,
-                )
-                if language is None:
-                    language = piece.language
-                if piece.text.strip():
-                    pieces.append(piece.text.strip())
-            full_text = " ".join(pieces)
 
-        if aligned is None:
-            # Per-turn transcription: no word timestamps (vLLM whisper — its
-            # segment times degrade to ~30s chunk boundaries on long audio,
-            # drifting turn edges and bleeding text across speakers) or the file
-            # was too large for a full pass. The diarization turns ARE accurate,
-            # so transcribe each turn's audio slice individually — attribution
-            # is exact by construction and every timestamp comes from pyannote.
-            # Turns longer than 30s are sub-chunked (whisper's native window;
-            # also keeps every request far below the upload cap).
-            logger.info(
-                "using per-turn transcription",
-                extra={
-                    "operation": "meeting.per_turn_stt",
-                    "turns": len(turns),
-                    "recording_id": recording_id,
-                },
-            )
-            _step("transcribing", "transcribe-turns")
-            chunk_s = 30.0
-            # One speaker's turns with almost no pause between them are one
-            # stretch of speech: a sentence is not split across two requests.
-            ordered = turn_stt.join_close_turns(turns)
-            texts: list[str] = []
-            for index, turn in enumerate(ordered):
-                if turn.end - turn.start < turn_stt.MIN_TURN_SECONDS:
-                    texts.append("")  # too short to carry speech
-                    continue
-                # A little real audio around the turn (never into a
-                # neighbour's speech): a cut exactly at the edges clips the
-                # first and last sound, and the word with it.
-                clip_start, clip_end = turn_stt.clip_bounds(
-                    ordered, index, wav_duration
+        def _detect(audio: dict, count: int | None) -> list[SpeakerTurn]:
+            """Who speaks when. Audio known to hold one person needs no telling
+            voices apart, only where there is speech, which is far faster."""
+            detector = get_diarization_service()
+            if count == 1:
+                return detector.speech_sync(audio)
+            return detector.diarize_sync(audio, num_speakers=count)
+
+        def _transcribe_track(
+            wav_path: str, turns: list[SpeakerTurn]
+        ) -> list[AlignedSegment]:
+            """Speech-to-text for one track (the recording, or one channel of
+            an online meeting): the turns' words, under the turns' speakers."""
+            nonlocal language, duration
+            aligned = None
+            # The whole recording as plain text, when the server gave it: the
+            # reference for what was said if turns are transcribed one by one.
+            full_text = ""
+            # The STT server caps upload size (vLLM: 25 MB ⇒ ~13 min of 16 kHz WAV;
+            # a 60-min meeting is ~115 MB), so the full-file pass only happens for
+            # files under the cap — longer meetings go straight to per-turn slices,
+            # each of which stays tiny.
+            max_upload = settings.STT_MAX_UPLOAD_MB * 1024 * 1024
+            wav_size = os.path.getsize(wav_path)
+            if wav_size <= max_upload:
+                _step("transcribing", "transcribe")
+                stt = service.transcribe_file_sync(
+                    wav_path, "audio.wav", language=requested_language
                 )
-                parts: list[str] = []
-                cursor = turn.start
-                while cursor < turn.end:
-                    # Heartbeat per 30 s STT chunk (review round 2: a single
-                    # long monologue turn spans MANY chunks, so a per-turn
-                    # beat could still go quiet for most of the stale window).
+                language = stt.language
+                duration = stt.duration or wav_duration
+                full_text = str(getattr(stt, "text", "") or "")
+                if stt.has_word_timestamps:
+                    # Word timestamps present: one-pass whisperX-style alignment.
+                    aligned = align(stt.words, turns)
+            else:
+                # Too large for one request: the whole-file text is still needed
+                # (it is the reference that completes the turns below), so it is
+                # transcribed in pieces of at most 30 s, cut only in pauses.
+                _step("transcribing", "transcribe")
+                windows = turn_stt.window_bounds(turns, wav_duration)
+                logger.info(
+                    "audio exceeds the STT upload cap — whole-file text in pieces",
+                    extra={
+                        "operation": "meeting.stt_full_pass_windowed",
+                        "bytes": wav_size,
+                        "max_upload_mb": settings.STT_MAX_UPLOAD_MB,
+                        "windows": len(windows),
+                        "recording_id": recording_id,
+                    },
+                )
+                pieces: list[str] = []
+                for start, end in windows:
                     with session_scope() as session:
                         transcription_attempt_crud.heartbeat_sync(
-                            session, aid, step="transcribe-turns"
+                            session, aid, step="transcribe"
                         )
-                    upper = min(cursor + chunk_s, turn.end)
-                    clip = slice_wav(
-                        wav_path,
-                        clip_start if cursor == turn.start else cursor,
-                        clip_end if upper == turn.end else upper,
-                        turn_stt.SILENCE_SECONDS,
-                    )
                     piece = service.transcribe_sync(
-                        clip, "turn.wav", language=requested_language
+                        slice_wav(wav_path, start, end, turn_stt.SILENCE_SECONDS),
+                        "window.wav",
+                        language=requested_language,
                     )
                     if language is None:
                         language = piece.language
                     if piece.text.strip():
-                        parts.append(piece.text.strip())
-                    cursor = upper
-                texts.append(" ".join(parts))
+                        pieces.append(piece.text.strip())
+                full_text = " ".join(pieces)
 
-            # A short turn ("Hej!", "Hur mår du?") is often too little audio
-            # for the model and comes back empty. Try it again with a few
-            # seconds of context and take the neighbours' known words out.
-            empty = rescued = 0
-            for index, turn in enumerate(ordered):
-                length = turn.end - turn.start
-                if (
-                    texts[index]
-                    or length < turn_stt.MIN_TURN_SECONDS
-                    or length > turn_stt.RESCUE_MAX_SECONDS
-                ):
-                    continue
-                empty += 1
-                with session_scope() as session:
-                    transcription_attempt_crud.heartbeat_sync(
-                        session, aid, step="transcribe-turns"
-                    )
-                wide_start, wide_end = turn_stt.context_bounds(turn, wav_duration)
-                heard = service.transcribe_sync(
-                    slice_wav(wav_path, wide_start, wide_end, turn_stt.SILENCE_SECONDS),
-                    "context.wav",
-                    language=requested_language,
-                ).text
-                before, after = turn_stt.context_texts(
-                    ordered, texts, index, (wide_start, wide_end)
-                )
-                found = turn_stt.rescue_text(heard, before, after, turn_seconds=length)
-                if found:
-                    texts[index] = found
-                    rescued += 1
-            if empty:
+            if aligned is None:
+                # Per-turn transcription: no word timestamps (vLLM whisper — its
+                # segment times degrade to ~30s chunk boundaries on long audio,
+                # drifting turn edges and bleeding text across speakers) or the file
+                # was too large for a full pass. The diarization turns ARE accurate,
+                # so transcribe each turn's audio slice individually — attribution
+                # is exact by construction and every timestamp comes from pyannote.
+                # Turns longer than 30s are sub-chunked (whisper's native window;
+                # also keeps every request far below the upload cap).
                 logger.info(
-                    "speaker turns came back empty",
+                    "using per-turn transcription",
                     extra={
-                        "operation": "meeting.per_turn_empty",
-                        "empty": empty,
-                        "rescued": rescued,
+                        "operation": "meeting.per_turn_stt",
+                        "turns": len(turns),
                         "recording_id": recording_id,
                     },
                 )
-            # One stretch of a speaker's speech cut into pieces: heard again
-            # as a whole and shown as one segment (never losing a word).
-            runs = turn_stt.piece_runs(ordered, texts)
-            if runs:
-                first_of = {run[0]: run for run in runs}
-                merged = {index for run in runs for index in run}
-                new_turns: list[SpeakerTurn] = []
-                new_texts: list[str] = []
+                _step("transcribing", "transcribe-turns")
+                chunk_s = 30.0
+                # One speaker's turns with almost no pause between them are one
+                # stretch of speech: a sentence is not split across two requests.
+                ordered = turn_stt.join_close_turns(turns)
+                texts: list[str] = []
                 for index, turn in enumerate(ordered):
-                    run = first_of.get(index)
-                    if run is None:
-                        if index not in merged:
-                            new_turns.append(turn)
-                            new_texts.append(texts[index])
+                    if turn.end - turn.start < turn_stt.MIN_TURN_SECONDS:
+                        texts.append("")  # too short to carry speech
                         continue
-                    whole = SpeakerTurn(turn.speaker, turn.start, ordered[run[-1]].end)
+                    # A little real audio around the turn (never into a
+                    # neighbour's speech): a cut exactly at the edges clips the
+                    # first and last sound, and the word with it.
+                    clip_start, clip_end = turn_stt.clip_bounds(
+                        ordered, index, wav_duration
+                    )
+                    parts: list[str] = []
+                    cursor = turn.start
+                    while cursor < turn.end:
+                        # Heartbeat per 30 s STT chunk (review round 2: a single
+                        # long monologue turn spans MANY chunks, so a per-turn
+                        # beat could still go quiet for most of the stale window).
+                        with session_scope() as session:
+                            transcription_attempt_crud.heartbeat_sync(
+                                session, aid, step="transcribe-turns"
+                            )
+                        upper = min(cursor + chunk_s, turn.end)
+                        clip = slice_wav(
+                            wav_path,
+                            clip_start if cursor == turn.start else cursor,
+                            clip_end if upper == turn.end else upper,
+                            turn_stt.SILENCE_SECONDS,
+                        )
+                        piece = service.transcribe_sync(
+                            clip, "turn.wav", language=requested_language
+                        )
+                        if language is None:
+                            language = piece.language
+                        if piece.text.strip():
+                            parts.append(piece.text.strip())
+                        cursor = upper
+                    texts.append(" ".join(parts))
+
+                # A short turn ("Hej!", "Hur mår du?") is often too little audio
+                # for the model and comes back empty. Try it again with a few
+                # seconds of context and take the neighbours' known words out.
+                empty = rescued = 0
+                for index, turn in enumerate(ordered):
+                    length = turn.end - turn.start
+                    if (
+                        texts[index]
+                        or length < turn_stt.MIN_TURN_SECONDS
+                        or length > turn_stt.RESCUE_MAX_SECONDS
+                    ):
+                        continue
+                    empty += 1
                     with session_scope() as session:
                         transcription_attempt_crud.heartbeat_sync(
                             session, aid, step="transcribe-turns"
                         )
-                    clip_start, _ = turn_stt.clip_bounds(ordered, run[0], wav_duration)
-                    _, clip_end = turn_stt.clip_bounds(ordered, run[-1], wav_duration)
+                    wide_start, wide_end = turn_stt.context_bounds(turn, wav_duration)
                     heard = service.transcribe_sync(
                         slice_wav(
-                            wav_path, clip_start, clip_end, turn_stt.SILENCE_SECONDS
+                            wav_path, wide_start, wide_end, turn_stt.SILENCE_SECONDS
                         ),
-                        "pieces.wav",
+                        "context.wav",
                         language=requested_language,
                     ).text
-                    new_turns.append(whole)
-                    new_texts.append(
-                        turn_stt.pick_run_text(heard, [texts[i] for i in run])
+                    before, after = turn_stt.context_texts(
+                        ordered, texts, index, (wide_start, wide_end)
                     )
+                    found = turn_stt.rescue_text(
+                        heard, before, after, turn_seconds=length
+                    )
+                    if found:
+                        texts[index] = found
+                        rescued += 1
+                if empty:
+                    logger.info(
+                        "speaker turns came back empty",
+                        extra={
+                            "operation": "meeting.per_turn_empty",
+                            "empty": empty,
+                            "rescued": rescued,
+                            "recording_id": recording_id,
+                        },
+                    )
+                # One stretch of a speaker's speech cut into pieces: heard again
+                # as a whole and shown as one segment (never losing a word).
+                runs = turn_stt.piece_runs(ordered, texts)
+                if runs:
+                    first_of = {run[0]: run for run in runs}
+                    merged = {index for run in runs for index in run}
+                    new_turns: list[SpeakerTurn] = []
+                    new_texts: list[str] = []
+                    for index, turn in enumerate(ordered):
+                        run = first_of.get(index)
+                        if run is None:
+                            if index not in merged:
+                                new_turns.append(turn)
+                                new_texts.append(texts[index])
+                            continue
+                        whole = SpeakerTurn(
+                            turn.speaker, turn.start, ordered[run[-1]].end
+                        )
+                        with session_scope() as session:
+                            transcription_attempt_crud.heartbeat_sync(
+                                session, aid, step="transcribe-turns"
+                            )
+                        clip_start, _ = turn_stt.clip_bounds(
+                            ordered, run[0], wav_duration
+                        )
+                        _, clip_end = turn_stt.clip_bounds(
+                            ordered, run[-1], wav_duration
+                        )
+                        heard = service.transcribe_sync(
+                            slice_wav(
+                                wav_path, clip_start, clip_end, turn_stt.SILENCE_SECONDS
+                            ),
+                            "pieces.wav",
+                            language=requested_language,
+                        ).text
+                        new_turns.append(whole)
+                        new_texts.append(
+                            turn_stt.pick_run_text(heard, [texts[i] for i in run])
+                        )
+                    logger.info(
+                        "pieces of speech merged",
+                        extra={
+                            "operation": "meeting.per_turn_pieces",
+                            "runs": len(runs),
+                            "turns": len(merged),
+                            "recording_id": recording_id,
+                        },
+                    )
+                    ordered, texts = new_turns, new_texts
+                # The model sometimes stops after the first sentence of a clip.
+                # The whole-file text has those words: put them back.
+                texts, put_back = turn_stt.fill_from_full_text(
+                    full_text, ordered, texts
+                )
+                if put_back:
+                    logger.info(
+                        "words missing from speaker turns were put back",
+                        extra={
+                            "operation": "meeting.per_turn_completed",
+                            "runs": put_back,
+                            "recording_id": recording_id,
+                        },
+                    )
+                # A speaker change found a second early or late leaves the end of
+                # a sentence under the next speaker: give it back.
+                texts, rejoined = turn_stt.realign_sentences(full_text, ordered, texts)
+                if rejoined:
+                    logger.info(
+                        "sentences split by a speaker change were put back together",
+                        extra={
+                            "operation": "meeting.per_turn_realigned",
+                            "sentences": rejoined,
+                            "recording_id": recording_id,
+                        },
+                    )
+                aligned = [
+                    AlignedSegment(
+                        speaker=turn.speaker, start=turn.start, end=turn.end, text=text
+                    )
+                    for turn, text in zip(ordered, texts, strict=True)
+                    if text
+                ]
+            return aligned
+
+        # What is said on each track, and the audio to recognise voices from.
+        tracks: list[tuple[list[SpeakerTurn], dict]] = []
+        # The label of the person recording, when the microphone is theirs alone.
+        own_label: str | None = None
+        two_sources = False
+        if channel_paths is not None:
+            mic_audio = load_waveform(channel_paths[0])
+            tab_audio = load_waveform(channel_paths[1])
+            mic_samples = mic_audio["waveform"][0].numpy()
+            tab_samples = tab_audio["waveform"][0].numpy()
+            two_sources = channel_audio.channels_differ(mic_samples, tab_samples)
+            if not two_sources:
+                # Said to be microphone + tab, but both channels hold one mix.
                 logger.info(
-                    "pieces of speech merged",
+                    "channels hold the same signal — treating the recording as mixed",
                     extra={
-                        "operation": "meeting.per_turn_pieces",
-                        "runs": len(runs),
-                        "turns": len(merged),
+                        "operation": "meeting.channels_same",
                         "recording_id": recording_id,
                     },
                 )
-                ordered, texts = new_turns, new_texts
-            # The model sometimes stops after the first sentence of a clip.
-            # The whole-file text has those words: put them back.
-            texts, put_back = turn_stt.fill_from_full_text(full_text, ordered, texts)
-            if put_back:
-                logger.info(
-                    "words missing from speaker turns were put back",
-                    extra={
-                        "operation": "meeting.per_turn_completed",
-                        "runs": put_back,
-                        "recording_id": recording_id,
-                    },
+                del mic_audio, tab_audio, mic_samples, tab_samples
+        if two_sources:
+            # An online meeting: the microphone and the meeting tab are apart,
+            # so "here" and "in the call" are known from the channel. Each is
+            # detected and transcribed on its own.
+            _step("diarizing", "diarize")
+            mic_turns = _detect(mic_audio, mic_speakers)
+            # The call heard through the loudspeakers is not someone here.
+            mic_turns, echoes = channel_audio.drop_echo(
+                mic_turns, mic_samples, tab_samples, int(mic_audio["sample_rate"])
+            )
+            mic_turns, mic_labels = channel_audio.relabel(mic_turns, 0)
+            tab_turns = _detect(tab_audio, expected_speakers)
+            tab_turns, tab_labels = channel_audio.relabel(tab_turns, len(mic_labels))
+            logger.info(
+                "microphone and tab detected apart",
+                extra={
+                    "operation": "meeting.two_sources",
+                    "mic_turns": len(mic_turns),
+                    "mic_speakers": len(mic_labels),
+                    "tab_turns": len(tab_turns),
+                    "tab_speakers": len(tab_labels),
+                    "echo_turns_dropped": echoes,
+                    "recording_id": recording_id,
+                },
+            )
+            if mic_speakers == 1 and mic_labels:
+                own_label = "SPEAKER_00"
+            # A side on which nobody spoke has nothing to transcribe.
+            aligned = sorted(
+                [
+                    segment
+                    for path, side in (
+                        (channel_paths[0], mic_turns),
+                        (channel_paths[1], tab_turns),
+                    )
+                    if side
+                    for segment in _transcribe_track(path, side)
+                ],
+                key=lambda segment: (segment.start, segment.end),
+            )
+            tracks = [(mic_turns, mic_audio), (tab_turns, tab_audio)]
+        else:
+            # Load once as a pyannote waveform dict (avoids its torchcodec file
+            # reader) — the one unavoidable in-memory representation: pyannote
+            # consumes the full waveform.
+            waveform = load_waveform(wav_path)
+            # Diarization first — its turns are the backbone of attribution.
+            _step("diarizing", "diarize")
+            count = expected_speakers
+            if audio_layout == "mic_tab":
+                # The counts were given per side; one mix holds both.
+                count = (
+                    mic_speakers + expected_speakers
+                    if mic_speakers and expected_speakers
+                    else None
                 )
-            # A speaker change found a second early or late leaves the end of
-            # a sentence under the next speaker: give it back.
-            texts, rejoined = turn_stt.realign_sentences(full_text, ordered, texts)
-            if rejoined:
-                logger.info(
-                    "sentences split by a speaker change were put back together",
-                    extra={
-                        "operation": "meeting.per_turn_realigned",
-                        "sentences": rejoined,
-                        "recording_id": recording_id,
-                    },
-                )
-            aligned = [
-                AlignedSegment(
-                    speaker=turn.speaker, start=turn.start, end=turn.end, text=text
-                )
-                for turn, text in zip(ordered, texts, strict=True)
-                if text
-            ]
+            turns = _detect(waveform, count)
+            aligned = _transcribe_track(wav_path, turns)
+            tracks = [(turns, waveform)]
 
         # 4. Identify speakers against the enrolled directory (issue #6:
         # consent + exact-model candidates, several clean turns per speaker,
@@ -827,7 +950,7 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
             )
         label_to_match: dict[str, tuple[uuid.UUID | None, float | None]] = {}
         pending_suggestions: list[dict] = []
-        if centroids:
+        for turns, waveform in tracks if centroids else []:
             for label in sorted({t.speaker for t in turns}):
                 clean_turns = speaker_matching.select_turns(
                     turns,
@@ -872,17 +995,20 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
         seg_rows = []
         for idx, seg in enumerate(aligned):
             pid, conf = label_to_match.get(seg.speaker, (None, None))
-            seg_rows.append(
-                {
-                    "idx": idx,
-                    "start_ms": int(seg.start * 1000),
-                    "end_ms": int(seg.end * 1000),
-                    "speaker_label": seg.speaker,
-                    "speaker_profile_id": pid,
-                    "speaker_confidence": conf,
-                    "text": seg.text,
-                }
-            )
+            row = {
+                "idx": idx,
+                "start_ms": int(seg.start * 1000),
+                "end_ms": int(seg.end * 1000),
+                "speaker_label": seg.speaker,
+                "speaker_profile_id": pid,
+                "speaker_confidence": conf,
+                "text": seg.text,
+            }
+            if seg.speaker == own_label and pid is None and owner_name:
+                # Alone at the microphone: these lines are the person
+                # recording. A name like any other; it can be changed.
+                row["speaker_display_name"] = owner_name
+            seg_rows.append(row)
         segment_count = len(seg_rows)
         with session_scope() as session:
             # ONE transaction acknowledges the attempt AND persists its result
@@ -1072,9 +1198,10 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                 )
         raise
     finally:
-        if wav_path:
-            with contextlib.suppress(OSError):
-                os.remove(wav_path)
+        for path in (wav_path, *(channel_paths or ())):
+            if path:
+                with contextlib.suppress(OSError):
+                    os.remove(path)
         # The one-line-per-run summary the Grafana meetings dashboard aggregates
         # (status + duration_ms + segments — see ARCHITECTURE.md).
         logger.info(

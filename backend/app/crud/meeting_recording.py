@@ -36,6 +36,8 @@ async def create(
     actor: User,
     requested_language: str = "auto",
     expected_speakers: int | None = None,
+    audio_layout: str = "mixed",
+    mic_speakers: int | None = None,
     commit: bool = True,
 ) -> MeetingRecording:
     """Create a ``pending`` recording attributed to ``actor``.
@@ -53,6 +55,9 @@ async def create(
         participant_consent=participant_consent,
         requested_language=requested_language,
         expected_speakers=expected_speakers,
+        audio_layout=audio_layout,
+        # Only an online-meeting recording has a microphone side to count.
+        mic_speakers=mic_speakers if audio_layout == "mic_tab" else None,
         created_by_id=actor.id,
         created_by_email=actor.email,
     )

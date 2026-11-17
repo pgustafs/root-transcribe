@@ -200,3 +200,75 @@ async def test_retry_can_change_the_number_of_speakers(
         url, headers=user_token_headers, json={"expected_speakers": 0}
     )
     assert bad.status_code == 422
+
+
+async def test_retry_can_change_who_is_at_the_microphone(
+    client: AsyncClient,
+    user_token_headers: dict[str, str],
+    meetings_enabled: _FakeAudioStore,
+    db_session: AsyncSession,
+) -> None:
+    """An online-meeting recording made as "just me" where a colleague joined
+    in the room: the count at the microphone can be corrected on a re-run.
+    What the channels hold cannot: that describes the file."""
+    from app.models.meeting_recording import MeetingRecording
+
+    wid = await _make_workspace(client, user_token_headers)
+    rec = await _create_recording(client, user_token_headers, wid)
+    url = f"{API}/workspaces/{wid}/recordings/{rec['id']}/retry"
+
+    async def finish(layout: str | None = None) -> None:
+        for attempt in (
+            (await db_session.execute(select(MeetingTranscriptionAttempt)))
+            .scalars()
+            .all()
+        ):
+            attempt.status = "completed"
+        row = await db_session.get(MeetingRecording, uuid.UUID(rec["id"]))
+        row.status = "completed"
+        if layout:
+            row.audio_layout = layout
+        await db_session.commit()
+
+    # One mix: there is no microphone side, the count is not taken.
+    await finish()
+    mixed = await client.post(url, headers=user_token_headers, json={"mic_speakers": 2})
+    assert mixed.status_code == 202, mixed.text
+    assert mixed.json()["mic_speakers"] is None
+
+    await finish("mic_tab")
+    changed = await client.post(
+        url,
+        headers=user_token_headers,
+        json={"mic_speakers": 2, "expected_speakers": 3},
+    )
+    assert changed.status_code == 202, changed.text
+    assert (changed.json()["mic_speakers"], changed.json()["expected_speakers"]) == (
+        2,
+        3,
+    )
+    assert changed.json()["audio_layout"] == "mic_tab"
+    db_session.expire_all()
+    newest = (
+        (
+            await db_session.execute(
+                select(MeetingTranscriptionAttempt).order_by(
+                    MeetingTranscriptionAttempt.attempt_number.desc()
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert newest.config["audio_layout"] == "mic_tab"
+    assert newest.config["mic_speakers"] == 2
+
+    # Left out: kept. Null: detect.
+    await finish()
+    kept = await client.post(url, headers=user_token_headers)
+    assert kept.json()["mic_speakers"] == 2
+    await finish()
+    auto = await client.post(
+        url, headers=user_token_headers, json={"mic_speakers": None}
+    )
+    assert auto.json()["mic_speakers"] is None

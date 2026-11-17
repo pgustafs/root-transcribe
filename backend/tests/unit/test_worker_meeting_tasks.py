@@ -56,6 +56,10 @@ def _wire_pipeline(
     content_type: str = "audio/webm",
     requested_language: str = "auto",
     expected_speakers: int | None = None,
+    audio_layout: str = "mixed",
+    mic_speakers: int | None = None,
+    channels: tuple | None = None,
+    owner_name: str | None = None,
     speaker_embeddings: dict[str, list[float]] | None = None,
     voiceprints: list | None = None,
 ):
@@ -82,21 +86,61 @@ def _wire_pipeline(
     monkeypatch.setattr(
         "app.services.diarization.probe_wav", lambda path: (40.0, 16_000)
     )
+    # An online-meeting recording: ``channels`` = (microphone, tab) samples.
+    # Each channel is its own WAV; the fakes below know them by path.
+    side_of = {f"{wav_path}.mic": "mic", f"{wav_path}.tab": "tab"}
+    calls["wav_path"] = wav_path
+    calls["channel_decodes"] = 0
+
+    def _channel_wavs(in_path, max_seconds=None):
+        calls["channel_decodes"] += 1
+        for path in side_of:  # the decoded channel files, cleaned up by the task
+            open(path, "wb").close()
+        return tuple(side_of)
+
     monkeypatch.setattr(
-        "app.services.diarization.load_waveform",
-        # 40s of fake 16 kHz audio — the task derives the ground-truth duration
-        # from the waveform shape.
-        lambda path: {
-            "waveform": SimpleNamespace(shape=(1, 640_000)),
-            "sample_rate": 16_000,
-        },
+        "app.services.diarization.decode_file_to_channel_wavs", _channel_wavs
     )
+    monkeypatch.setattr(
+        tasks_module, "_full_name_sync", lambda session, user_id: owner_name
+    )
+
+    def _load(path):
+        side = side_of.get(path)
+        if side is None:
+            # 40s of fake 16 kHz audio — the task derives the ground-truth
+            # duration from the waveform shape.
+            return {
+                "waveform": SimpleNamespace(shape=(1, 640_000)),
+                "sample_rate": 16_000,
+            }
+        samples = channels[0 if side == "mic" else 1]
+        return {
+            "waveform": [SimpleNamespace(numpy=lambda: samples)],
+            "sample_rate": 16_000,
+            "side": side,
+        }
+
+    monkeypatch.setattr("app.services.diarization.load_waveform", _load)
+    calls["detected"] = []
+
+    def _turns_for(audio, how, count):
+        # ``turns`` is one list, or {"mic": [...], "tab": [...]} per channel.
+        side = audio.get("side")
+        calls["detected"].append((side, how, count))
+        return turns[side] if isinstance(turns, dict) else turns
+
     monkeypatch.setattr(
         "app.services.diarization.get_diarization_service",
         lambda: SimpleNamespace(
             diarize_sync=lambda audio, num_speakers=None: (
-                calls["num_speakers"].append(num_speakers) or turns
-            )
+                calls["num_speakers"].append(num_speakers)
+                or _turns_for(audio, "voices", num_speakers)
+            ),
+            speech_sync=lambda audio: [
+                SpeakerTurn("SPEAKER_00", t.start, t.end)
+                for t in _turns_for(audio, "speech", 1)
+            ],
         ),
     )
     monkeypatch.setattr(
@@ -138,7 +182,12 @@ def _wire_pipeline(
     )
     monkeypatch.setattr(
         "app.services.diarization.slice_wav",
-        lambda path, start, end, pad=0.0: f"{start:.1f}-{end:.1f}".encode(),
+        # A channel's clips say which channel they are from.
+        lambda path, start, end, pad=0.0: (
+            f"{side_of[path]}:{start:.1f}-{end:.1f}"
+            if path in side_of
+            else f"{start:.1f}-{end:.1f}"
+        ).encode(),
     )
 
     @contextmanager
@@ -175,6 +224,8 @@ def _wire_pipeline(
             audio_content_type=content_type,
             requested_language=requested_language,
             expected_speakers=expected_speakers,
+            audio_layout=audio_layout,
+            mic_speakers=mic_speakers,
             # Recorder context the client shipped with the upload (issue #37 r7);
             # the worker attaches it to any media rejection it emits.
             client_diagnostics={"browser_family": "Chrome", "container": "webm"},
@@ -427,6 +478,189 @@ def test_speaker_detection_gets_the_number_of_speakers_the_user_gave(
     )
     assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
     assert calls["num_speakers"] == [expected]
+
+
+def _two_channels(seconds: float = 20.0):
+    """A microphone and a tab channel that hold different sound."""
+    np = pytest.importorskip("numpy")
+    rng = np.random.default_rng(1)
+    n = int(seconds * 16000)
+    return (
+        rng.standard_normal(n).astype("float32") * 0.1,
+        rng.standard_normal(n).astype("float32") * 0.1,
+    )
+
+
+def _silent_stt() -> SimpleNamespace:
+    return SimpleNamespace(
+        words=[], text="", language="sv", duration=20.0, has_word_timestamps=False
+    )
+
+
+def test_an_online_meeting_is_told_apart_by_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Microphone on one channel, the call on the other: who is here and who
+    is in the call is known from the channel. With one person on each side no
+    voices are told apart at all, and the person recording gets their name."""
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=_silent_stt(),
+        turns={
+            "mic": [SpeakerTurn("X", 1.0, 3.0), SpeakerTurn("X", 8.0, 9.5)],
+            "tab": [SpeakerTurn("Y", 3.5, 7.0), SpeakerTurn("Y", 10.0, 12.0)],
+        },
+        audio_layout="mic_tab",
+        mic_speakers=1,
+        expected_speakers=1,
+        channels=_two_channels(),
+        owner_name="Peter Gustafsson",
+    )
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    # Only "where is there speech" on both sides: the fast way.
+    assert calls["detected"] == [("mic", "speech", 1), ("tab", "speech", 1)]
+    segs = calls["segments"]
+    # One transcript in order of time; each side's words come from its own
+    # channel, so the two can never be mixed up.
+    assert [
+        (s["speaker_label"], s["start_ms"], s["text"].split(":")[0]) for s in segs
+    ] == [
+        ("SPEAKER_00", 1000, "turn-text-mic"),
+        ("SPEAKER_01", 3500, "turn-text-tab"),
+        ("SPEAKER_00", 8000, "turn-text-mic"),
+        ("SPEAKER_01", 10000, "turn-text-tab"),
+    ]
+    # Alone at the microphone: those lines carry the recording person's name.
+    assert [s.get("speaker_display_name") for s in segs] == [
+        "Peter Gustafsson",
+        None,
+        "Peter Gustafsson",
+        None,
+    ]
+    # The mix and both channel files are removed afterwards.
+    assert not os.path.exists(calls["wav_path"])
+    assert not os.path.exists(calls["wav_path"] + ".mic")
+    assert not os.path.exists(calls["wav_path"] + ".tab")
+
+
+def test_a_hybrid_meeting_tells_voices_apart_on_each_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Several people in the room and several in the call: each side is told
+    apart by voice, the sides by channel. Nobody is named automatically."""
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=_silent_stt(),
+        turns={
+            "mic": [
+                SpeakerTurn("SPEAKER_01", 1.0, 3.0),
+                SpeakerTurn("SPEAKER_00", 4.0, 6.0),
+            ],
+            "tab": [
+                SpeakerTurn("SPEAKER_00", 7.0, 9.0),
+                SpeakerTurn("SPEAKER_01", 10.0, 12.0),
+                SpeakerTurn("SPEAKER_00", 13.0, 15.0),
+            ],
+        },
+        audio_layout="mic_tab",
+        mic_speakers=2,
+        expected_speakers=None,
+        channels=_two_channels(),
+        owner_name="Peter Gustafsson",
+    )
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    # Two people here, an unknown number in the call.
+    assert calls["detected"] == [("mic", "voices", 2), ("tab", "voices", None)]
+    segs = calls["segments"]
+    # The room's speakers come first, the call's after them: no label is
+    # shared between the sides.
+    assert [s["speaker_label"] for s in segs] == [
+        "SPEAKER_00",
+        "SPEAKER_01",
+        "SPEAKER_02",
+        "SPEAKER_03",
+        "SPEAKER_02",
+    ]
+    assert all(s.get("speaker_display_name") is None for s in segs)
+
+
+def test_the_call_heard_through_the_loudspeakers_is_not_transcribed_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without headphones the call comes out of the loudspeakers into the
+    microphone. That stretch of the microphone channel is the call again, not
+    someone here, and is left out."""
+    np = pytest.importorskip("numpy")
+    from .test_channel_audio import echo_of, silence, voice
+
+    call = np.concatenate([silence(1), voice(3, 1), silence(6)])
+    mic = echo_of(call)
+    mic[5 * 16000 : 8 * 16000] += voice(3, 3)
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=_silent_stt(),
+        turns={
+            "mic": [SpeakerTurn("X", 1.1, 4.0), SpeakerTurn("X", 5.0, 8.0)],
+            "tab": [SpeakerTurn("Y", 1.0, 4.0)],
+        },
+        audio_layout="mic_tab",
+        mic_speakers=1,
+        expected_speakers=1,
+        channels=(mic, call),
+    )
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    assert [(s["speaker_label"], s["start_ms"]) for s in calls["segments"]] == [
+        ("SPEAKER_01", 1000),  # the call, once
+        ("SPEAKER_00", 5000),  # the answer here
+    ]
+
+
+def test_a_recording_whose_channels_are_one_mix_goes_the_ordinary_way(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Said to be microphone + tab, but both channels hold the same signal:
+    there are no two sources to use, so voices are told apart as always (with
+    the two sides' counts added up)."""
+    mic, _ = _two_channels()
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=_silent_stt(),
+        turns=[SpeakerTurn("SPEAKER_00", 0.0, 9.5)],
+        audio_layout="mic_tab",
+        mic_speakers=1,
+        expected_speakers=2,
+        channels=(mic, mic.copy()),
+        owner_name="Peter Gustafsson",
+    )
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    assert calls["detected"] == [(None, "voices", 3)]
+    (seg,) = calls["segments"]
+    assert seg["text"] == "turn-text-0.0-9.7"
+    assert seg.get("speaker_display_name") is None
+
+
+def test_one_speaker_needs_no_telling_voices_apart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recording said to hold one person: only where there is speech."""
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=_silent_stt(),
+        turns=[SpeakerTurn("ANY", 0.0, 9.5)],
+        expected_speakers=1,
+    )
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+    assert calls["detected"] == [(None, "speech", 1)]
+    assert calls["channel_decodes"] == 0
+    assert [s["speaker_label"] for s in calls["segments"]] == ["SPEAKER_00"]
 
 
 def test_transcribe_attempt_skips_full_pass_for_large_audio(
