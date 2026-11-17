@@ -1484,6 +1484,11 @@ def create_meeting_clip(clip_id: str) -> dict[str, str]:
                         "-to",
                         f"{clip.end_ms / 1000:.3f}",
                         "-vn",
+                        # An online meeting has the microphone in one channel
+                        # and the call in the other. A clip is listened to
+                        # outside the app, where nothing folds them: mix them
+                        # here, or it plays one side in each ear.
+                        *(["-ac", "1"] if recording.audio_layout == "mic_tab" else []),
                         "-c:a",
                         "libopus",
                         out,

@@ -2006,17 +2006,22 @@ def test_create_meeting_clip_slices_and_stores(
         SimpleNamespace(get_ffmpeg_exe=lambda: "/fake/ffmpeg"),
     )
 
+    commands: list[list[str]] = []
+
     def fake_run(cmd, capture_output=True, timeout=0):
         # The output path is the last argument; write the "sliced" audio.
         with open(cmd[-1], "wb") as fh:
             fh.write(b"sliced-opus")
         assert "-ss" in cmd and "-to" in cmd
+        commands.append(cmd)
         return SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr("subprocess.run", fake_run)
 
     result = create_meeting_clip(str(clip.id))
     assert result["status"] == "ready"
+    # An ordinary recording's clip keeps its channels as they are.
+    assert "-ac" not in commands[0]
     session.refresh(clip)
     assert clip.status == "ready"
     assert clip.audio_key and clip.audio_key.endswith(".webm")
@@ -2033,6 +2038,23 @@ def test_create_meeting_clip_slices_and_stores(
         "status": "skipped",
         "reason": "not_pending",
     }
+
+    # An online meeting has one side in each channel: its clip is mixed, so it
+    # plays in both ears wherever it is listened to.
+    rec.audio_layout = "mic_tab"
+    meet = MeetingClip(
+        workspace_id=ws.id,
+        recording_id=rec.id,
+        title="From a call",
+        start_ms=0,
+        end_ms=1000,
+        status="pending",
+    )
+    session.add(meet)
+    session.commit()
+    assert create_meeting_clip(str(meet.id))["status"] == "ready"
+    mixed = commands[-1]
+    assert mixed[mixed.index("-ac") + 1] == "1"
 
     # Failure path: ffmpeg error persists on the row AND raises.
     clip2 = MeetingClip(
