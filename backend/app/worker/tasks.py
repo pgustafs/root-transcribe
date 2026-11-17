@@ -793,6 +793,18 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
                         "recording_id": recording_id,
                     },
                 )
+            # A speaker change found a second early or late leaves the end of
+            # a sentence under the next speaker: give it back.
+            texts, rejoined = turn_stt.realign_sentences(full_text, ordered, texts)
+            if rejoined:
+                logger.info(
+                    "sentences split by a speaker change were put back together",
+                    extra={
+                        "operation": "meeting.per_turn_realigned",
+                        "sentences": rejoined,
+                        "recording_id": recording_id,
+                    },
+                )
             aligned = [
                 AlignedSegment(
                     speaker=turn.speaker, start=turn.start, end=turn.end, text=text

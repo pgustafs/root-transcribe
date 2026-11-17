@@ -552,6 +552,41 @@ def test_a_sentence_the_model_skipped_in_a_turn_comes_back_from_the_full_text(
     assert calls["stt_calls"] == ["audio.wav", "turn.wav", "turn.wav", "turn.wav"]
 
 
+def test_the_end_of_a_question_does_not_stay_in_the_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Speaker detection put the change of speaker a second early: the end of
+    the question was cut into the answer's turn. The whole-file text has the
+    sentence in one piece, and it goes back to the person who asked."""
+    stt = SimpleNamespace(
+        words=[],
+        text="Har du skrivit någon text som vi kan använda? Japp, i något "
+        "dokument som Kenneth delade.",
+        language="sv",
+        duration=20.0,
+        has_word_timestamps=False,
+    )
+    turns = [
+        SpeakerTurn("SPEAKER_00", 1.0, 2.6),
+        SpeakerTurn("SPEAKER_01", 3.5, 7.1),
+    ]
+    calls = _wire_pipeline(monkeypatch, stt_result=stt, turns=turns)
+    calls["heard"] = {
+        "0.8-2.8": "Har du skrivit någon text",
+        "3.3-7.3": "Som vi kan använda? Japp, i något dokument som Kenneth delade.",
+    }
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    segs = calls["segments"]
+    assert [(s["speaker_label"], s["text"]) for s in segs] == [
+        ("SPEAKER_00", "Har du skrivit någon text som vi kan använda?"),
+        ("SPEAKER_01", "Japp, i något dokument som Kenneth delade."),
+    ]
+    # The turns keep the times speaker detection gave them.
+    assert [(s["start_ms"], s["end_ms"]) for s in segs] == [(1000, 2600), (3500, 7100)]
+
+
 def test_short_turns_that_come_back_empty_are_heard_again_with_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
