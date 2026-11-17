@@ -45,6 +45,19 @@ class TranscriptionResult:
     has_word_timestamps: bool = False
 
 
+class WholeFileRefused(Exception):
+    """The server answered the request for a whole recording with an error.
+
+    Servers limit what one request may hold, each in its own way (bytes,
+    seconds of audio, memory), and say so only when asked. The same audio in
+    short pieces is still fine, so the caller goes on with those.
+    """
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 class TranscriptionService:
     """Thin wrapper over the OpenAI-compatible transcription endpoint."""
 
@@ -109,12 +122,18 @@ class TranscriptionService:
         self, path: str, filename: str, *, language: str | None = None
     ) -> TranscriptionResult:
         """Transcribe from a file handle — the whole recording never becomes a
-        Python bytes object (issue #6). The SDK streams the handle."""
-        with (
-            open(path, "rb") as fh,
-            log_operation(logger, "stt.transcribe", model=settings.STT_MODEL),
-        ):
-            response = self._request((filename, fh), language)
+        Python bytes object (issue #6). The SDK streams the handle.
+
+        Raises :class:`WholeFileRefused` when the server answers with an error.
+        """
+        try:
+            with (
+                open(path, "rb") as fh,
+                log_operation(logger, "stt.transcribe", model=settings.STT_MODEL),
+            ):
+                response = self._request((filename, fh), language)
+        except APIStatusError as exc:
+            raise WholeFileRefused(exc.status_code, str(exc)) from exc
         return _parse_response(response)
 
     def transcribe_sync(

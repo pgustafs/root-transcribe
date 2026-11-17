@@ -116,6 +116,10 @@ def _wire_pipeline(
         calls["stt_languages"].append(language)
         if isinstance(stt_result, Exception):
             raise stt_result
+        if filename == "audio.wav" and calls.get("refuse_whole_file"):
+            from app.services.transcription import WholeFileRefused
+
+            raise WholeFileRefused(400, "Audio exceeds maximum allowed duration")
         if filename in ("turn.wav", "context.wav", "pieces.wav"):
             # Per-turn fallback slice: echo a text derived from the clip marker
             # (or what a test says the model hears in that clip).
@@ -460,6 +464,30 @@ def test_transcribe_attempt_skips_full_pass_for_large_audio(
     assert calls["finish"] == [
         {"status": "completed", "duration_seconds": 40.0, "language": "en"}
     ]
+
+
+def test_a_whole_file_the_server_refuses_is_transcribed_in_pieces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server has limits of its own (vLLM: 600 s of audio in one request),
+    which a file under our size cap can still break. Its refusal does not fail
+    the recording: the whole-file text comes from 30 s pieces instead."""
+    stt = SimpleNamespace(
+        words=[], text="", language="en", duration=None, has_word_timestamps=False
+    )
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=stt,
+        turns=[SpeakerTurn("SPEAKER_00", 0.0, 9.5)],
+    )
+    calls["refuse_whole_file"] = True
+
+    result = transcribe_attempt(str(uuid.uuid4()))
+
+    assert result["status"] == "completed"
+    assert calls["stt_calls"] == ["audio.wav", "window.wav", "turn.wav"]
+    (seg,) = calls["segments"]
+    assert seg["text"] == "turn-text-0.0-9.7"
 
 
 def test_per_turn_transcription_subchunks_long_turns(

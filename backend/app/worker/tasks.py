@@ -438,7 +438,10 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
     )
     from app.services.transcript_align import Segment as AlignedSegment
     from app.services.transcript_align import SpeakerTurn, align
-    from app.services.transcription import get_transcription_service
+    from app.services.transcription import (
+        WholeFileRefused,
+        get_transcription_service,
+    )
 
     aid = uuid.UUID(attempt_id)
     with session_scope() as session:
@@ -594,11 +597,29 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
         # each of which stays tiny.
         max_upload = settings.STT_MAX_UPLOAD_MB * 1024 * 1024
         wav_size = os.path.getsize(wav_path)
+        stt = None
         if wav_size <= max_upload:
             _step("transcribing", "transcribe")
-            stt = service.transcribe_file_sync(
-                wav_path, "audio.wav", language=requested_language
-            )
+            try:
+                stt = service.transcribe_file_sync(
+                    wav_path, "audio.wav", language=requested_language
+                )
+            except WholeFileRefused as exc:
+                # Under our own size cap, and still refused: servers have
+                # limits of their own (vLLM: 600 s of audio per request).
+                # The whole-file text comes from pieces instead. A server
+                # that is failing altogether refuses the first piece too.
+                logger.warning(
+                    "STT server refused the whole file — text in pieces",
+                    extra={
+                        "operation": "meeting.stt_full_pass_refused",
+                        "status": exc.status,
+                        "reason": str(exc)[:300],
+                        "seconds": round(wav_duration, 1),
+                        "recording_id": recording_id,
+                    },
+                )
+        if stt is not None:
             language = stt.language
             duration = stt.duration or wav_duration
             full_text = str(getattr(stt, "text", "") or "")
@@ -612,7 +633,7 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
             _step("transcribing", "transcribe")
             windows = turn_stt.window_bounds(turns, wav_duration)
             logger.info(
-                "audio exceeds the STT upload cap — whole-file text in pieces",
+                "whole-file text in pieces",
                 extra={
                     "operation": "meeting.stt_full_pass_windowed",
                     "bytes": wav_size,
