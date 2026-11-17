@@ -167,6 +167,10 @@ def _wire_pipeline(
         calls["stt_languages"].append(language)
         if isinstance(stt_result, Exception):
             raise stt_result
+        if filename == "audio.wav" and calls.get("refuse_whole_file"):
+            from app.services.transcription import WholeFileRefused
+
+            raise WholeFileRefused(400, "Audio exceeds maximum allowed duration")
         if filename in ("turn.wav", "context.wav", "pieces.wav"):
             # Per-turn fallback slice: echo a text derived from the clip marker
             # (or what a test says the model hears in that clip).
@@ -706,6 +710,58 @@ def test_transcribe_attempt_skips_full_pass_for_large_audio(
     # language comes from the first piece sent.
     assert calls["finish"] == [
         {"status": "completed", "duration_seconds": 40.0, "language": "en"}
+    ]
+
+
+def test_a_whole_file_the_server_refuses_is_transcribed_in_pieces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server has limits of its own (vLLM: 600 s of audio in one request),
+    which a file under our size cap can still break. Its refusal does not fail
+    the recording: the whole-file text comes from 30 s pieces instead."""
+    stt = SimpleNamespace(
+        words=[], text="", language="en", duration=None, has_word_timestamps=False
+    )
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=stt,
+        turns=[SpeakerTurn("SPEAKER_00", 0.0, 9.5)],
+    )
+    calls["refuse_whole_file"] = True
+
+    result = transcribe_attempt(str(uuid.uuid4()))
+
+    assert result["status"] == "completed"
+    assert calls["stt_calls"] == ["audio.wav", "window.wav", "turn.wav"]
+    (seg,) = calls["segments"]
+    assert seg["text"] == "turn-text-0.0-9.7"
+
+
+def test_a_refused_whole_file_is_not_asked_for_again_on_the_other_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both channels of an online meeting are as long as each other: what the
+    server refused for the microphone it is not sent again for the call."""
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=_silent_stt(),
+        turns={
+            "mic": [SpeakerTurn("X", 1.0, 3.0)],
+            "tab": [SpeakerTurn("Y", 3.5, 7.0)],
+        },
+        audio_layout="mic_tab",
+        mic_speakers=1,
+        expected_speakers=1,
+        channels=_two_channels(),
+    )
+    calls["refuse_whole_file"] = True
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    assert calls["stt_calls"].count("audio.wav") == 1
+    assert [s["speaker_label"] for s in calls["segments"]] == [
+        "SPEAKER_00",
+        "SPEAKER_01",
     ]
 
 

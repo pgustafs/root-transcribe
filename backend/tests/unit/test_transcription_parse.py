@@ -209,3 +209,19 @@ def test_failing_server_reports_the_original_error():
         service.transcribe_sync(b"audio", "turn.wav")
     assert caught.value.status_code == 500
     assert service._plain_text_until == 0.0
+
+
+def test_a_refused_whole_file_is_told_apart_from_other_failures(tmp_path):
+    """The server's answer to a whole recording it will not take (too long, too
+    large) is an error of its own, so the caller can go on with pieces."""
+    from app.services.transcription import WholeFileRefused
+
+    def create(**kwargs):
+        raise _status_error(400)
+
+    service = _service_with(create)
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"audio")
+    with pytest.raises(WholeFileRefused) as caught:
+        service.transcribe_file_sync(str(audio), "audio.wav")
+    assert caught.value.status == 400
