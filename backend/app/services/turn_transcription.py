@@ -66,6 +66,10 @@ WINDOW_SECONDS = 30.0
 PIECE_SECONDS = 1.5
 #: ...and belongs with its speaker's speech that is at most this far away.
 PIECE_GAP_SECONDS = 2.5
+#: A speaker change found a second early or late puts a few words on the
+#: wrong side. More words than this are not such a slip: the sentence really
+#: passed from one person to the other.
+MAX_MOVED_WORDS = 5
 
 
 def join_close_turns(
@@ -462,3 +466,151 @@ def fill_from_full_text(
             words[target].extend(run)
         added += 1
     return [" ".join(turn) for turn in words], added
+
+
+#: A word that ends a sentence ("använda?", "delade.", 'sa han."').
+_SENTENCE_END = re.compile(r"[.?!\u2026][\"'\u201d\u2019)\]]*$")
+
+
+def _set_first_letter(word: str, *, upper: bool) -> str:
+    at = _LETTER.search(word)
+    if at is None:
+        return word
+    letter = word[at.start()]
+    return (
+        word[: at.start()]
+        + (letter.upper() if upper else letter.lower())
+        + (word[at.end() :])
+    )
+
+
+def realign_sentences(
+    full_text: str,
+    turns: Sequence[SpeakerTurn],
+    texts: Sequence[str],
+    *,
+    max_moved: int = MAX_MOVED_WORDS,
+) -> tuple[list[str], int]:
+    """Give a sentence that straddles a speaker change back to one speaker.
+
+    Speaker detection finds a change of speaker a second early or late when
+    there is no pause between the two ("Har du skrivit någon text" / "som vi
+    kan använda? Japp, ..."): the words on the wrong side of the change then
+    stand under the other person. The whole-file text has the sentence in one
+    piece, so where two turns of different speakers share a sentence, the
+    shorter part moves over to the longer one.
+
+    Careful by design, because a wrong move puts words under the wrong person
+    just as the slip did:
+
+    * the first turn must break off: its own text does not end a sentence
+      there. When it does ("... ifall de betalar." / "till företag och
+      myndigheter."), the whole-file text running the two together is not
+      enough to go on;
+    * only words at the change itself move, at most ``max_moved`` of them,
+      and only when the other side has more of the sentence;
+    * a sentence ends where the whole-file text ends it *or* where the turn's
+      own text does, so a run-on in either does not make it longer than it is.
+
+    Words are moved, never changed or dropped. Nothing is done when the
+    transcripts do not broadly agree. Returns the texts and how many
+    sentences were put back together.
+    """
+    tokens: list[list[str]] = [_tokens(text) for text in texts]
+    flat = [(_key(word), index) for index, turn in enumerate(tokens) for word in turn]
+    full = _tokens(full_text)
+    if not flat or not full:
+        return list(texts), 0
+    matcher = SequenceMatcher(
+        None, [key for key, _ in flat], [_key(w) for w in full], autojunk=False
+    )
+    if matcher.ratio() < MIN_AGREEMENT:
+        return list(texts), 0
+    # Which sentence of the whole-file text each word belongs to (None: the
+    # word has no counterpart there), and that text's spelling of it.
+    sentence_of: list[int] = []
+    number = 0
+    for word in full:
+        sentence_of.append(number)
+        if _SENTENCE_END.search(word):
+            number += 1
+    mapped: list[int | None] = [None] * len(flat)
+    for block in matcher.get_matching_blocks():
+        for offset in range(block.size):
+            mapped[block.a + offset] = block.b + offset
+    # Per turn: (word, sentence or None, the whole-file text's word or None).
+    words: list[list[tuple[str, int | None, str | None]]] = [[] for _ in tokens]
+    position = 0
+    for index, turn in enumerate(tokens):
+        for word in turn:
+            j = mapped[position]
+            words[index].append(
+                (word, None, None) if j is None else (word, sentence_of[j], full[j])
+            )
+            position += 1
+
+    moved = 0
+    heard = [index for index, turn in enumerate(words) if turn]
+    for a, b in zip(heard, heard[1:], strict=False):
+        if turns[a].speaker == turns[b].speaker or not words[a] or not words[b]:
+            continue
+        sentence = words[a][-1][1]
+        if sentence is None or sentence != words[b][0][1]:
+            continue  # the change of speaker is between two sentences
+        # The sentence's last words in A: back to where it began.
+        tail = 0
+        for offset in range(len(words[a]) - 1, -1, -1):
+            word, its, _full = words[a][offset]
+            ended_here = offset < len(words[a]) - 1 and _SENTENCE_END.search(word)
+            if (its is not None and its != sentence) or ended_here:
+                break
+            tail += 1
+        # Its first words in B: up to and with the word that ends it.
+        head = 0
+        for word, its, theirs in words[b]:
+            if its is not None and its != sentence:
+                break
+            head += 1
+            if _SENTENCE_END.search(word) or (
+                theirs is not None and _SENTENCE_END.search(theirs)
+            ):
+                break
+        if tail == head or min(tail, head) > max_moved:
+            continue
+        if _SENTENCE_END.search(words[a][-1][0]):
+            continue  # A's own text ends its sentence here
+        if head < tail:
+            # B's first words finish A's sentence.
+            part, words[b] = words[b][:head], words[b][head:]
+            first, its, theirs = part[0]
+            # It continues the sentence: a small letter, unless the whole-file
+            # text writes it with a capital (a name).
+            if theirs is None or not theirs[:1].isupper():
+                part[0] = (_set_first_letter(first, upper=False), its, theirs)
+            last, its, theirs = words[a][-1]
+            if theirs is not None:  # no full stop in the middle of it
+                words[a][-1] = (
+                    _TAIL.sub("", last) + _TAIL.search(theirs).group(),
+                    its,
+                    theirs,
+                )
+            words[a].extend(part)
+            if words[b]:
+                first, its, theirs = words[b][0]
+                words[b][0] = (_set_first_letter(first, upper=True), its, theirs)
+        else:
+            # A's last words begin B's sentence.
+            part, words[a] = words[a][-tail:], words[a][:-tail]
+            first, its, theirs = words[b][0]
+            if theirs is None or not theirs[:1].isupper():
+                words[b][0] = (_set_first_letter(first, upper=False), its, theirs)
+            last, its, theirs = part[-1]
+            if theirs is not None:
+                part[-1] = (
+                    _TAIL.sub("", last) + _TAIL.search(theirs).group(),
+                    its,
+                    theirs,
+                )
+            words[b][0:0] = part
+        moved += 1
+    return [" ".join(word for word, _, _ in turn) for turn in words], moved

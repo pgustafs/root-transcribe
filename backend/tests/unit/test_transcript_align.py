@@ -485,6 +485,126 @@ def test_rescue_knows_every_turn_in_the_listening_window() -> None:
     assert context_texts(turns[3:4], [""], 0, (73.0, 78.0)) == ("", "")
 
 
+def test_a_sentence_split_by_a_speaker_change_goes_back_to_one_speaker() -> None:
+    """Speaker detection finds a change a second early or late when there is
+    no pause: the words on the wrong side move back, and only those."""
+    from app.services.turn_transcription import realign_sentences
+
+    turns = [
+        SpeakerTurn("A", 0.0, 5.0),
+        SpeakerTurn("B", 5.9, 9.5),
+        SpeakerTurn("A", 11.0, 13.0),
+        SpeakerTurn("B", 13.0, 16.0),
+    ]
+    texts = [
+        "Så får vi fixa till bilder på allihopa sen då. Har du skrivit någon text",
+        "Som vi kan använda? Japp, i något dokument som Kenneth delade.",
+        "Något dokument som Kenneth delade?",
+        "för ett par veckor sedan.",
+    ]
+    full = (
+        "Så får vi fixa till bilder på allihopa sen då. Har du skrivit någon "
+        "text som vi kan använda? Japp, i något dokument som Kenneth delade. "
+        "Något dokument som Kenneth delade? För ett par veckor sedan."
+    )
+    out, moved = realign_sentences(full, turns, texts)
+    assert moved == 1
+    # The end of A's question leaves B's answer; it continues A's sentence,
+    # so it loses its capital. Nothing else changes.
+    assert out == [
+        "Så får vi fixa till bilder på allihopa sen då. Har du skrivit någon text "
+        "som vi kan använda?",
+        "Japp, i något dokument som Kenneth delade.",
+        "Något dokument som Kenneth delade?",
+        "för ett par veckor sedan.",
+    ]
+    # No word is added, lost or changed.
+    assert sorted(" ".join(out).lower().split()) == sorted(
+        " ".join(texts).lower().split()
+    )
+    # Done once: a second pass finds nothing.
+    assert realign_sentences(full, turns, out) == (out, 0)
+
+    # The other way round: the start of B's sentence stands at the end of A.
+    out, moved = realign_sentences(
+        "Men annars kommer jag in imorgon. Ja, och det är ju så skönt numera.",
+        turns[:2],
+        ["Men annars kommer jag in imorgon. Ja, och", "Det är ju så skönt numera."],
+    )
+    assert (out, moved) == (
+        ["Men annars kommer jag in imorgon.", "Ja, och det är ju så skönt numera."],
+        1,
+    )
+    # A whole short turn can go ("Vad" / "Trodde du ...?"): it then has no text.
+    out, moved = realign_sentences(
+        "Vad trodde du för ett par år sedan?",
+        turns[:2],
+        ["Vad", "Trodde du för ett par år sedan?"],
+    )
+    assert (out, moved) == (["", "Vad trodde du för ett par år sedan?"], 1)
+
+
+def test_sentences_are_not_realigned_without_good_reason() -> None:
+    from app.services.turn_transcription import realign_sentences
+
+    a_b = [SpeakerTurn("A", 0.0, 5.0), SpeakerTurn("B", 5.5, 9.0)]
+
+    def unchanged(full: str, texts: list[str], turns=a_b) -> bool:
+        return realign_sentences(full, turns, texts) == (texts, 0)
+
+    # A's own text ends its sentence: the whole-file text running the two
+    # together is not enough ("... ifall de betalar." / "till företag ...").
+    assert unchanged(
+        "Jag skulle hjälpa min granne ifall de betalar till företag och "
+        "myndigheter. Så skriver vi istället.",
+        [
+            "Jag skulle hjälpa min granne ifall de betalar.",
+            "till företag och myndigheter. Så skriver vi istället.",
+        ],
+    )
+    # The change of speaker is between two sentences: nothing to do.
+    assert unchanged(
+        "Hur är läget? Det är bra, själv?", ["Hur är läget", "Det är bra, själv?"]
+    )
+    # Both sides have as much of the sentence: no telling whose it is.
+    assert unchanged(
+        "Ska vi ta den sen på fredag eller?", ["Ska vi ta den", "sen på fredag eller?"]
+    )
+    # More than a few words is not a slip of the boundary: the sentence really
+    # passed from one person to the other.
+    assert unchanged(
+        "Jag tänkte att vi kunde ta det där mötet med kunden redan på torsdag "
+        "eftermiddag om det passar alla som ska vara med.",
+        [
+            "Jag tänkte att vi kunde ta det där mötet med kunden redan på torsdag",
+            "eftermiddag om det passar alla som ska vara med.",
+        ],
+    )
+    # The same speaker on both sides: a pause, not a change of speaker.
+    same = [SpeakerTurn("A", 0.0, 5.0), SpeakerTurn("A", 6.0, 9.0)]
+    assert unchanged(
+        "Har du skrivit någon text som vi kan använda?",
+        ["Har du skrivit någon text", "som vi kan använda?"],
+        same,
+    )
+    # A run-on in the whole-file text does not stretch the sentence: B's own
+    # text ends it after "använda?", so only those words are in play.
+    out, moved = realign_sentences(
+        "Har du skrivit någon text som vi kan använda japp i något dokument "
+        "som Kenneth delade.",
+        a_b,
+        [
+            "Har du skrivit någon text",
+            "Som vi kan använda? Japp, i något dokument som Kenneth delade.",
+        ],
+    )
+    assert moved == 1 and out[1] == "Japp, i något dokument som Kenneth delade."
+    # Another talk altogether, or no whole-file text: nothing is touched.
+    texts = ["Har du skrivit någon text", "som vi kan använda?"]
+    assert unchanged("something else entirely was said in this recording", texts)
+    assert unchanged("", texts)
+
+
 def test_whole_file_text_is_not_used_when_it_cannot_be_trusted() -> None:
     from app.services.turn_transcription import fill_from_full_text
 
