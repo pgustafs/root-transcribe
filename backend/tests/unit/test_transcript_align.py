@@ -430,7 +430,7 @@ def test_words_put_back_read_as_one_sentence() -> None:
 
 def test_symbols_standing_alone_survive_the_put_back() -> None:
     """Lines are rebuilt from their words when something is put back; a
-    lone "&" or dash is not a word but must stay where it was."""
+    lone "&" is not a word but must stay where it was."""
     from app.services.turn_transcription import fill_from_full_text
 
     turns = [SpeakerTurn("A", 0.0, 8.0)]
@@ -440,12 +440,46 @@ def test_symbols_standing_alone_survive_the_put_back() -> None:
         ["- Ska vi ha kvar Bok & Demo och läsa om plattformen"],
     )
     assert added == 1
-    assert filled == ["- Ska vi ha kvar Bok & Demo och läsa om plattformen eller"]
+    # The "&" stays; the dash that opened the line (a speaker-change mark) goes.
+    assert filled == ["Ska vi ha kvar Bok & Demo och läsa om plattformen eller"]
     # Also inside the words that are put back.
     filled, _ = fill_from_full_text(
         "Vi har frågor & svar på sidan nu", turns, ["Vi har frågor på sidan nu"]
     )
     assert filled == ["Vi har frågor & svar på sidan nu"]
+
+
+def test_a_dash_that_marks_a_speaker_change_is_not_kept() -> None:
+    """The speech model writes "- Ja. - Nej." where the speaker changes inside
+    a clip. With one speaker a line the dashes mean nothing; kept, one ends up
+    behind the last word of the line before and hides the end of a sentence."""
+    from app.services.turn_transcription import fill_from_full_text, realign_sentences
+
+    turns = [SpeakerTurn("A", 0.0, 5.0), SpeakerTurn("B", 5.5, 9.0)]
+    full = "På den här, eller på tjänstesidan? - Ja. - Nej. I andra mejlet."
+    filled, _ = fill_from_full_text(
+        full, turns, ["På den här, eller på tjänstesidan?", "Nej. I andra mejlet."]
+    )
+    assert filled == ["På den här, eller på tjänstesidan? Ja.", "Nej. I andra mejlet."]
+    # "Ja." ends A's line, so nothing of B's is moved over to it.
+    assert realign_sentences(full, turns, filled) == (filled, 0)
+    # A question's end goes back to the question without a dash behind it.
+    out, moved = realign_sentences(
+        "Har du skrivit någon text som vi kan använda? - Japp, i ett dokument.",
+        turns,
+        ["Har du skrivit någon text", "Som vi kan använda? Japp, i ett dokument."],
+    )
+    assert (out, moved) == (
+        ["Har du skrivit någon text som vi kan använda?", "Japp, i ett dokument."],
+        1,
+    )
+    # A dash inside a word, or a symbol that joins two words, is untouched.
+    kept, _ = fill_from_full_text(
+        "Vi har AI-stack & on-prem i drift nu",
+        turns[:1],
+        ["Vi har AI-stack & on-prem i drift"],
+    )
+    assert kept == ["Vi har AI-stack & on-prem i drift nu"]
 
 
 def test_rescue_knows_every_turn_in_the_listening_window() -> None:
