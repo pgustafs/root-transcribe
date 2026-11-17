@@ -210,13 +210,23 @@ def _words(text: str) -> list[str]:
     return [word for word in text.split() if _key(word)]
 
 
+#: A dash standing alone. Speech models write one where the speaker changes
+#: inside a clip ("- Ja. - Nej."); with one speaker a line it means nothing.
+_DASH = re.compile(r"^[-\u2010-\u2015]+$")
+
+
 def _tokens(text: str) -> list[str]:
-    """The words of ``text`` for rebuilding it: a symbol standing alone ("&",
-    "-") is no word of its own but stays with the word before it (the word
-    after it at the start), so "Bok & Demo" is not rebuilt as "Bok Demo"."""
+    """The words of ``text`` for rebuilding it: a symbol standing alone ("&")
+    is no word of its own but stays with the word before it (the word after
+    it at the start), so "Bok & Demo" is not rebuilt as "Bok Demo". A dash
+    standing alone is left out: it marks a change of speaker inside a clip,
+    and kept, it would end up behind the last word of the line before
+    ("använda? -") and hide that the sentence ended there."""
     tokens: list[str] = []
     lead = ""
     for part in text.split():
+        if _DASH.match(part):
+            continue
         if _key(part):
             tokens.append(f"{lead}{part}")
             lead = ""
