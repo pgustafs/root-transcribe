@@ -137,17 +137,26 @@ def _wire_pipeline(
         calls["detected"].append((side, how, count))
         return turns[side] if isinstance(turns, dict) else turns
 
+    def _working(on_progress):
+        # The real pipeline reports back with every batch of its work.
+        for _ in range(3):
+            on_progress()
+
     monkeypatch.setattr(
         "app.services.diarization.get_diarization_service",
         lambda: SimpleNamespace(
-            diarize_sync=lambda audio, num_speakers=None: (
+            diarize_sync=lambda audio, num_speakers=None, on_progress=None: (
                 calls["num_speakers"].append(num_speakers)
+                or _working(on_progress)
                 or _turns_for(audio, "voices", num_speakers)
             ),
-            speech_sync=lambda audio: [
-                SpeakerTurn("SPEAKER_00", t.start, t.end)
-                for t in _turns_for(audio, "speech", 1)
-            ],
+            speech_sync=lambda audio, on_progress=None: (
+                _working(on_progress)
+                or [
+                    SpeakerTurn("SPEAKER_00", t.start, t.end)
+                    for t in _turns_for(audio, "speech", 1)
+                ]
+            ),
         ),
     )
     monkeypatch.setattr(
@@ -159,6 +168,7 @@ def _wire_pipeline(
 
     stt_calls: list[str] = []
     calls["stt_calls"] = stt_calls
+    calls["heartbeats"] = []
 
     calls["stt_languages"] = []
 
@@ -250,7 +260,7 @@ def _wire_pipeline(
     monkeypatch.setattr(
         tasks_module.transcription_attempt_crud,
         "heartbeat_sync",
-        lambda s, aid, step=None: None,
+        lambda s, aid, step=None: calls["heartbeats"].append(step),
     )
     monkeypatch.setattr(
         tasks_module.transcription_attempt_crud,
@@ -711,6 +721,39 @@ def test_transcribe_attempt_skips_full_pass_for_large_audio(
     assert calls["finish"] == [
         {"status": "completed", "duration_seconds": 40.0, "language": "en"}
     ]
+
+
+def test_speaker_detection_keeps_the_attempt_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Telling voices apart can run for an hour without reaching any other
+    heartbeat. The attempt hears from it meanwhile (not with every batch of
+    work: at most once per interval), so it is not taken for a dead worker."""
+    stt = SimpleNamespace(
+        words=[], text="", language="en", duration=None, has_word_timestamps=False
+    )
+    calls = _wire_pipeline(
+        monkeypatch,
+        stt_result=stt,
+        turns=[SpeakerTurn("SPEAKER_00", 0.0, 9.5)],
+    )
+    clock = iter(range(0, 10_000, 20))  # every look at the clock: 20 s later
+    monkeypatch.setattr(tasks_module.time, "monotonic", lambda: float(next(clock)))
+
+    assert transcribe_attempt(str(uuid.uuid4()))["status"] == "completed"
+
+    # Three reports from the pipeline, 20 s or more apart, and a heartbeat at
+    # most every 30 s: it is heard from, but not with every report.
+    assert 1 <= calls["heartbeats"].count(None) < 3
+
+
+def test_the_time_allowed_fits_the_longest_recording() -> None:
+    """Telling voices apart on CPU takes about two thirds of a recording's own
+    length, once per channel in a hybrid meeting: the attempt's time limit has
+    to leave room for that, or long meetings can never finish."""
+    longest = tasks_module.settings.MEETING_MAX_DURATION_MINUTES * 60
+    assert transcribe_attempt.soft_time_limit >= 2 * longest * 2 / 3
+    assert transcribe_attempt.time_limit > transcribe_attempt.soft_time_limit
 
 
 def test_a_whole_file_the_server_refuses_is_transcribed_in_pieces(

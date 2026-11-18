@@ -399,6 +399,10 @@ def _build_speaker_centroids(
     return {pid: speaker_directory.centroid(vecs) for pid, vecs in grouped.items()}
 
 
+#: Seconds between heartbeats while speakers are being detected.
+_DETECT_HEARTBEAT_SECONDS = 30.0
+
+
 def _full_name_sync(session, user_id: uuid.UUID | None) -> str | None:
     """A person's name as they wrote it, or None when they gave none."""
     from app.models.user import User
@@ -409,8 +413,8 @@ def _full_name_sync(session, user_id: uuid.UUID | None) -> str | None:
 
 @celery_app.task(
     name="tasks.transcribe_attempt",
-    soft_time_limit=settings.STT_TIMEOUT_SECONDS,
-    time_limit=settings.STT_TIMEOUT_SECONDS + 300,
+    soft_time_limit=settings.MEETING_TRANSCRIBE_TIMEOUT_SECONDS,
+    time_limit=settings.MEETING_TRANSCRIBE_TIMEOUT_SECONDS + 300,
 )
 def transcribe_attempt(attempt_id: str) -> dict[str, str]:
     """Run one idempotent transcription attempt (issue #6).
@@ -606,13 +610,29 @@ def transcribe_attempt(attempt_id: str) -> dict[str, str]:
         # its answer, and remembered for the next track of the same recording.
         whole_file_accepted = True
 
+        last_beat = time.monotonic()
+
+        def _still_working() -> None:
+            """A heartbeat from inside speaker detection, at most twice a
+            minute. Detection runs for as long as an hour without reaching
+            any other heartbeat, and an attempt that is silent that long is
+            taken for a dead worker and failed."""
+            nonlocal last_beat
+            if time.monotonic() - last_beat < _DETECT_HEARTBEAT_SECONDS:
+                return
+            last_beat = time.monotonic()
+            with session_scope() as session:
+                transcription_attempt_crud.heartbeat_sync(session, aid)
+
         def _detect(audio: dict, count: int | None) -> list[SpeakerTurn]:
             """Who speaks when. Audio known to hold one person needs no telling
             voices apart, only where there is speech, which is far faster."""
             detector = get_diarization_service()
             if count == 1:
-                return detector.speech_sync(audio)
-            return detector.diarize_sync(audio, num_speakers=count)
+                return detector.speech_sync(audio, on_progress=_still_working)
+            return detector.diarize_sync(
+                audio, num_speakers=count, on_progress=_still_working
+            )
 
         def _transcribe_track(
             wav_path: str, turns: list[SpeakerTurn]

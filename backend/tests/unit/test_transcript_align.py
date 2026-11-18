@@ -655,3 +655,30 @@ def test_whole_file_text_is_not_used_when_it_cannot_be_trusted() -> None:
         "får plats någonstans alls här. Jag heter Gunilla."
     )
     assert fill_from_full_text(long_extra, turns, texts) == (texts, 0)
+
+
+def test_speaker_detection_reports_that_it_is_still_working() -> None:
+    """The pipeline calls its ``hook`` with every batch of work; the caller
+    hears of each one. Without a caller listening, no hook is passed at all."""
+    from types import SimpleNamespace
+
+    from app.services.diarization import DiarizationService
+
+    seen: list[dict] = []
+
+    def pipeline(audio, **options):
+        seen.append(options)
+        hook = options.get("hook")
+        if hook is not None:
+            hook("segmentation", None, total=4, completed=2)
+            hook("embeddings", None, file=audio, total=4, completed=4)
+        return SimpleNamespace(itertracks=lambda yield_label: [])
+
+    service = DiarizationService()
+    service._pipeline = pipeline
+    reports: list[int] = []
+    service.diarize_sync({}, num_speakers=3, on_progress=lambda: reports.append(1))
+    assert len(reports) == 2
+    assert set(seen[0]) == {"num_speakers", "hook"}
+    service.diarize_sync({})
+    assert seen[1] == {}

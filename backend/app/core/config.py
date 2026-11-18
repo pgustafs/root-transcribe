@@ -146,6 +146,11 @@ class Settings(BaseSettings):
     MEETING_UPLOAD_PART_MB: int = 12
     MEETING_UPLOAD_SESSION_TTL_HOURS: int = 24
     MEETING_MAX_DURATION_MINUTES: int = 120
+    # How long one transcription attempt may take in all. It has to fit the
+    # longest recording allowed: telling voices apart on CPU takes about two
+    # thirds of the recording's own length (measured: 28 min for 42 min), and
+    # a hybrid meeting does it once per channel, before any text is written.
+    MEETING_TRANSCRIBE_TIMEOUT_SECONDS: int = 4 * 3600
 
     OUTBOX_MAX_SEND_ATTEMPTS: int = 10
     OUTBOX_RETRY_BASE_SECONDS: int = 30

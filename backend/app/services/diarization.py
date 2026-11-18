@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 import tempfile
+from collections.abc import Callable
 
 from app.core.config import settings
 from app.core.logging import log_operation
@@ -236,7 +237,11 @@ class DiarizationService:
         self._speech = None
 
     def speech_sync(
-        self, audio: dict, *, label: str = "SPEAKER_00"
+        self,
+        audio: dict,
+        *,
+        label: str = "SPEAKER_00",
+        on_progress: Callable[[], None] | None = None,
     ) -> list[SpeakerTurn]:
         """Where someone is speaking, as turns of one speaker.
 
@@ -257,7 +262,7 @@ class DiarizationService:
                 speech.instantiate({"min_duration_on": 0.0, "min_duration_off": 0.0})
                 self._speech = speech
         with log_operation(logger, "diarization.speech"):
-            regions = self._speech(audio).get_timeline().support()
+            regions = self._speech(audio, **_hook(on_progress)).get_timeline().support()
         return [
             SpeakerTurn(speaker=label, start=float(r.start), end=float(r.end))
             for r in regions
@@ -282,15 +287,24 @@ class DiarizationService:
         return self._pipeline
 
     def diarize_sync(
-        self, audio: dict, *, num_speakers: int | None = None
+        self,
+        audio: dict,
+        *,
+        num_speakers: int | None = None,
+        on_progress: Callable[[], None] | None = None,
     ) -> list[SpeakerTurn]:
         """Return chronologically-sorted speaker turns for a loaded waveform dict.
 
         ``num_speakers``: how many people speak, when the user knows it. Left
         out, the pipeline estimates the count, and a wrong estimate invents a
-        speaker out of quiet, distant or overlapping speech."""
+        speaker out of quiet, distant or overlapping speech.
+
+        ``on_progress``: called again and again while the pipeline works (it
+        can take as long as the recording itself), so the caller can show that
+        it is still alive."""
         pipeline = self._load()
         options = {"num_speakers": num_speakers} if num_speakers else {}
+        options.update(_hook(on_progress))
         with log_operation(logger, "diarization.run", num_speakers=num_speakers):
             output = pipeline(audio, **options)
         # pyannote 4.x community pipelines return a ``DiarizeOutput`` wrapper;
@@ -306,6 +320,19 @@ class DiarizationService:
             for seg, _, label in annotation.itertracks(yield_label=True)
         ]
         return absorb_slivers(turns)
+
+
+def _hook(on_progress: Callable[[], None] | None) -> dict:
+    """``on_progress`` as the pipeline's ``hook`` option (pyannote calls it
+    with every batch of each step); nothing when there is none, so the
+    pipeline is called exactly as before."""
+    if on_progress is None:
+        return {}
+
+    def hook(*args: object, **kwargs: object) -> None:
+        on_progress()
+
+    return {"hook": hook}
 
 
 class SpeakerEmbeddingService:
